@@ -266,7 +266,7 @@ Config yang dipakai ada di `council.config.example.json`. Intinya:
 {"type":"judged","ts":"...","round":1,"summary":"...","agreements":["..."],"disagreements":["..."],"draft":"...","next_focus":"..."}
 {"type":"votes","ts":"...","round":2,"draftRound":1,"status":"majority","accepted":["claude","codex"],"rejected":["deepseek"],"total":3,"votes":{},"final":true}
 {"type":"warning","ts":"...","stage":"frame|panel|judge","message":"..."}
-{"type":"finished","ts":"...","status":"unanimous|majority|no_consensus|error","round":2,"summary":"...","draft":"...","usage":{"calls":8},"session":"...","report":"/.../report.md"}
+{"type":"finished","ts":"...","status":"unanimous|majority|no_consensus|error","round":2,"decidedBy":"critique|vote|null","summary":"...","draft":"...","usage":{"calls":8},"session":"...","report":"/.../report.md"}
 ```
 
 Catatan:
@@ -302,7 +302,13 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ### Fase 0 — Uji coba & `council doctor`
 
-**Status:** kode selesai (`src/doctor.js`, adapter di `src/agents/`, 21 test dengan agen palsu). Claude sudah dicoba dengan CLI asli di lingkungan cloud. **Menunggu dijalankan di Windows.**
+**Status:** kode selesai (`src/doctor.js`, adapter di `src/agents/`). Doctor sudah dijalankan dengan Claude asli di lingkungan cloud (login OAuth langganan):
+
+- Alias `opus`, `sonnet`, dan `haiku` masing-masing jalan sebagai claude-opus-5-5, claude-sonnet-5-5, dan claude-haiku-4-5-20251001.
+- Opus dan Sonnet lolos uji web search.
+- Haiku menjawab "Node.js 26 sudah LTS", berbeda dari dua model lainnya, dan URL sumbernya ditolak server (HTTP 403).
+
+**Menunggu dijalankan di Windows.**
 
 - `council doctor` memeriksa tiap agen:
   - Claude/Codex: terpasang (`--version`).
@@ -317,9 +323,21 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ### Fase 1 — MVP debat
 
-- Adapter Claude, Codex, dan DeepSeek. Protokol FRAME → ronde blind → JUDGE → ronde kritik → vote. Skema + validasi, tampilan terminal sederhana, penyimpanan sesi + `report.md`.
-- Test dengan agen palsu (`fakeBin`), termasuk lewat `.cmd` di Windows. Skenario yang dites: agen timeout, JSON rusak, semua setuju di ronde 1, dan tidak pernah setuju.
-- **Selesai bila:** `council run "ide hackathon ..."` selesai dengan sendirinya dengan status `unanimous`, `majority`, atau `no_consensus`, dan laporannya bisa dibaca.
+**Status:** selesai dan sudah dicoba sungguhan dengan Claude di lingkungan cloud. Belum diuji di Windows, dan belum diuji dengan Codex maupun DeepSeek asli.
+
+- Kode:
+  - `src/council/`: protokol, prompt, skema dan perbaikan JSON, penghitungan suara, laporan.
+  - `src/ui/terminal.js`, `src/store/session.js`.
+  - `council run` beserta opsinya.
+- Test dengan agen palsu, baik di dalam proses maupun lewat CLI. Skenario: bulat di ronde 2, tidak pernah sepakat, mode mayoritas, JSON rusak lalu diperbaiki atau tetap rusak, panelis gagal lalu pulih, semua panelis gagal, moderator gagal merumuskan, dan pengaturan web search.
+- **Uji sungguhan** (2 Okt 2026): `examples/claude-only.json` (Opus, Sonnet, Haiku; moderator Opus), `--rounds 2`, topik ide hackathon.
+  - Selesai dalam sekitar 6 menit dengan 12 panggilan. `total_cost_usd` menurut Claude Code $2,24 (estimasi sisi klien).
+  - Ronde 2: ketiganya memilih "setuju dengan catatan", tapi Haiku tetap mencantumkan keberatan pemblokir (angka IASC berbeda antar-panelis). Kode menghitungnya sebagai tidak setuju, jadi hasilnya 2/3.
+  - Suara akhir: 3/3, **bulat**. Ide terpilih adalah "CekDulu", pemeriksa pesan, tautan, dan rekening sebelum transfer.
+  - Temuan 1: WebFetch para panelis ditolak proxy di lingkungan cloud, jadi tidak ada kutipan langsung. Semua angka di laporan diberi label estimasi oleh panelis sendiri. Ini memperkuat kebutuhan verifier di Fase 2.
+  - Temuan 2 (bug, sudah diperbaiki): draft moderator dipotong di 8.000 karakter sebelum dinilai panelis, dan ketiganya melaporkan bagian "Risiko" terpotong. Batasnya kini 40.000 karakter, dan moderator diminta menulis draft maksimal sekitar 1.000 kata.
+  - Temuan 3 (sudah diperbaiki): judul `##` di draft moderator merusak struktur laporan. Judul di dalam draft kini diturunkan levelnya.
+- **Selesai bila:** `council run "ide hackathon ..."` selesai dengan sendirinya dengan status `unanimous`, `majority`, atau `no_consensus`, dan laporannya bisa dibaca. Kriteria ini terpenuhi di cloud.
 
 ### Fase 2 — Data & fakta
 
@@ -347,7 +365,8 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 | Kuota langganan cepat habis. Satu sidang berarti banyak panggilan, dan Claude dipakai sebagai moderator sekaligus panelis. | Batasi `maxRounds`, pakai model yang lebih ringan untuk panelis, ringkas konteks antar ronde, tampilkan pemakaian tiap sidang, dan sediakan opsi moderator yang tidak ikut jadi panelis. Angka kuota pastinya tidak aku ketahui. |
 | Kebijakan atau harga berubah. F2, F4, dan F6 menunjukkan perubahan bisa terjadi cepat. | Adapter terisolasi. Tiap agen bisa dipindah ke API key lewat config. Jalankan `council doctor` secara rutin. |
 | Konsensus palsu. | Aturan di §5. |
-| Sumber hasil halusinasi. | Verifier di §6; klaim ❌ tidak dipakai. |
+| Sumber hasil halusinasi. | Verifier di §6; klaim ❌ tidak dipakai. Uji sungguhan menunjukkan model bisa berbeda soal fakta yang sama (Haiku vs Opus/Sonnet soal LTS Node.js). |
+| Panelis berbias ke label model (mis. mengalah ke "Opus"). | Fase 1 masih menampilkan nama panelis. Anonimisasi (Panelis A/B/C) dikerjakan di Fase 2. |
 | Masalah khas Windows (quoting, `.cmd`, proses yatim). | Pakai ulang `cli.js` dari `chatbot-wa` dan test lewat `.cmd`. |
 | Prompt injection dari konten web. | Agen tidak punya tool tulis atau shell; verifikasi dilakukan kode. |
 | Lama: satu sidang bisa makan beberapa menit. | Event progres; di WhatsApp, prosesnya asinkron. |

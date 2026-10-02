@@ -140,7 +140,7 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
         print()
         break
       case 'finished':
-        print(style.bold(`━━ Hasil: ${STATUS_LABEL[event.status] || event.status} (ronde ${event.round}) ━━`))
+        print(style.bold(`━━ Hasil: ${STATUS_LABEL[event.status] || event.status} (${event.decidedBy === 'vote' ? 'suara akhir' : `ronde ${event.round}`}) ━━`))
         if (event.summary) print(event.summary)
         if (event.report) print(style.dim(`Laporan: ${event.report}`))
         break

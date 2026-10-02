@@ -39,6 +39,7 @@ test('semua setuju di ronde 2 → bulat, kesimpulan = draft ronde 1', async () =
   assert.equal(types.filter((t) => t === 'agent_finished').length, 6)
   assert.equal(types.filter((t) => t === 'judged').length, 1)
   assert.equal(events.at(-1).status, 'unanimous')
+  assert.equal(events.at(-1).decidedBy, 'critique')
   assert.equal(events[0].ts, '2026-10-02T08:00:00.000Z')
 
   // Moderator (agen a) dipanggil untuk FRAME dan JUDGE dengan model moderator; sebagai panelis tanpa model khusus.
@@ -69,6 +70,7 @@ test('tidak pernah sepakat → suara akhir setelah batas ronde → tidak ada kon
   assert.equal(result.final.draft, 'draft r2')
   assert.equal(result.decided.draftRound, 2)
   assert.equal(events.filter((e) => e.type === 'votes').at(-1).final, true)
+  assert.equal(events.at(-1).decidedBy, 'vote')
 })
 
 test('mode mayoritas berhenti saat mayoritas; mode bulat lanjut sampai suara akhir', async () => {

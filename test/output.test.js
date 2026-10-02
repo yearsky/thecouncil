@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runCouncil } from '../src/council/protocol.js'
-import { buildReport, collectClaims } from '../src/council/report.js'
+import { buildReport, collectClaims, demoteHeadings } from '../src/council/report.js'
 import { createSession, slugify, stamp } from '../src/store/session.js'
 import { createTerminalRenderer } from '../src/ui/terminal.js'
 import { createStyle } from '../src/ui/style.js'
@@ -65,6 +65,18 @@ test('laporan: status, kesimpulan, tabel suara, klaim (karakter | di-escape), da
   assert.equal(collectClaims(result).length, 2) // klaim yang sama di ronde 2 tidak diulang
 })
 
+test('demoteHeadings menurunkan judul di luar blok kode', () => {
+  assert.equal(demoteHeadings('# A\n## B\n```\n# kode\n```\n#tag bukan judul\n###### F'), '### A\n#### B\n```\n# kode\n```\n#tag bukan judul\n###### F')
+})
+
+test('laporan: judul di draft moderator tidak merusak struktur laporan', async () => {
+  const judge = ({ round }) => ({ summary: 's', draft: `## Draft Kesimpulan (Ronde ${round})\n### 1. Masalah\nisi` })
+  const { result } = await sampleRun([scriptedAgent('a', { JUDGE: judge }), scriptedAgent('b')])
+  const md = buildReport(result)
+  assert.match(md, /## Kesimpulan\n\n#### Draft Kesimpulan \(Ronde 1\)\n##### 1\. Masalah/)
+  assert.doesNotMatch(md, /^## Draft/m)
+})
+
 test('laporan sidang tanpa konsensus memberi peringatan di kesimpulan', async () => {
   const no = { PANEL: ({ round }) => ({ position: 'p', ...(round > 1 ? { vote: { on_draft: 'DISAGREE' } } : {}) }), VOTE: { vote: { on_draft: 'DISAGREE', blocking_objections: ['salah hitung'] } } }
   const { result } = await sampleRun([scriptedAgent('a', no), scriptedAgent('b', no)], { maxRounds: 1 })
@@ -81,6 +93,7 @@ test('tampilan terminal mencetak jalannya sidang seperti chat', async () => {
   const out = { write: (s) => (text += s), isTTY: false }
   const r = createTerminalRenderer({ out, style: createStyle(false) })
   for (const e of events) r.handle({ ...e, ...(e.type === 'finished' ? { report: 'sessions/x/report.md' } : {}) })
+  r.handle({ type: 'finished', status: 'majority', round: 3, decidedBy: 'vote', summary: '' })
   r.close()
   assert.match(text, /━━ The Council ━━\nTopik: Ide hackathon \| UMKM/)
   assert.match(text, /Panel: A \(a-model\) · B \(b-model\)/)
@@ -90,6 +103,7 @@ test('tampilan terminal mencetak jalannya sidang seperti chat', async () => {
   assert.match(text, /suara: ✔ AGREE/)
   assert.match(text, /Suara atas draft ronde 1: 2\/2 setuju → BULAT/)
   assert.match(text, /━━ Hasil: ✔ BULAT \(ronde 2\) ━━\nringkas r1\nLaporan: sessions\/x\/report\.md/)
+  assert.match(text, /━━ Hasil: ◐ MAYORITAS \(suara akhir\) ━━/)
   assert.doesNotMatch(text, /menunggu:/) // baris status hanya untuk terminal interaktif
 })
 

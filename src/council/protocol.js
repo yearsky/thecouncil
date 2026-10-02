@@ -215,6 +215,8 @@ export async function runCouncil({
     type: 'finished',
     status,
     round: decided?.round ?? rounds.length,
+    // "vote" = diputuskan di pemungutan suara akhir, "critique" = sepakat di ronde kritik.
+    decidedBy: decided ? rounds.find((r) => r.round === decided.round)?.mode : null,
     summary: result.final?.summary || '',
     draft: result.final?.draft || '',
     usage,

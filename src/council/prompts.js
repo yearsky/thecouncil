@@ -11,6 +11,10 @@ export const PANELIST_SYSTEM =
   'Pertahankan pendapat yang didukung bukti, dan ubah pendapat hanya karena bukti atau argumen yang lebih kuat, bukan karena ingin cepat sepakat. ' +
   'Selalu jawab dalam Bahasa Indonesia dan hanya dengan satu objek JSON sesuai format yang diminta.'
 
+// Draft moderator adalah objek yang dinilai panelis, jadi batasnya jauh lebih longgar daripada jawaban
+// panelis lain: draft yang terpotong membuat panelis memberi suara atas teks yang tidak lengkap.
+export const DRAFT_LIMIT = 40000
+
 export function clip(text, max) {
   const s = String(text ?? '')
   return s.length > max ? `${s.slice(0, max)}… (dipotong)` : s
@@ -71,7 +75,7 @@ export function panelPrompt({ frame, round, draft, focus, own, others = [], webS
   if (blind) {
     lines.push('Ini ronde blind: jawab secara independen. Kamu belum melihat jawaban panelis lain.')
   } else {
-    lines.push(`Draft kesimpulan moderator dari ronde ${round - 1}:`, '<<<', clip(draft, 8000), '>>>')
+    lines.push(`Draft kesimpulan moderator dari ronde ${round - 1}:`, '<<<', clip(draft, DRAFT_LIMIT), '>>>')
     if (focus) lines.push(`Fokus ronde ini dari moderator: ${focus}`)
     if (own) lines.push('', 'Posisimu di ronde sebelumnya:', '<<<', clip(own.position, 2500), '>>>')
     if (others.length) lines.push('', 'Jawaban panelis lain di ronde sebelumnya:', '', ...others.map((o) => describeResponse(o.label, o.response) + '\n'))
@@ -100,13 +104,13 @@ export function panelPrompt({ frame, round, draft, focus, own, others = [], webS
 
 export function judgePrompt({ frame, round, previousDraft, responses, failed = [] }) {
   const lines = [`Tahap: JUDGE · Ronde ${round}`, '', frameBlock(frame), '']
-  if (previousDraft) lines.push('Draft kesimpulan sebelumnya:', '<<<', clip(previousDraft, 8000), '>>>', '')
+  if (previousDraft) lines.push('Draft kesimpulan sebelumnya:', '<<<', clip(previousDraft, DRAFT_LIMIT), '>>>', '')
   lines.push(`Jawaban panelis di ronde ${round}:`, '', ...responses.map((r) => describeResponse(r.label, r.response) + '\n'))
   for (const f of failed) lines.push(`## ${f.label}`, 'Gagal menjawab di ronde ini.', '')
   lines.push(
     'Tugasmu sebagai moderator:',
     '1. Rangkum poin yang disepakati dan yang masih diperdebatkan.',
-    '2. Susun draft kesimpulan terbaik yang menjawab pertanyaan sidang dan memenuhi kriterianya. Gunakan hanya argumen dan klaim dari panelis; jangan menambah fakta baru tanpa sumber. Sebutkan ketidakpastian dengan jujur.',
+    '2. Susun draft kesimpulan terbaik yang menjawab pertanyaan sidang dan memenuhi kriterianya. Gunakan hanya argumen dan klaim dari panelis; jangan menambah fakta baru tanpa sumber. Sebutkan ketidakpastian dengan jujur. Tulis ringkas (usahakan maksimal sekitar 1.000 kata): utamakan keputusan, alasan, dan angka kunci, bukan pengulangan jawaban panelis.',
     previousDraft ? '3. Perbaiki draft berdasarkan kritik dan keberatan yang memblokir. Jangan mengabaikan keberatan hanya karena datang dari minoritas.' : '3. Kalau panelis berbeda pendapat, jangan memaksakan kesepakatan; tulis perbedaannya.',
     '4. Tentukan fokus untuk ronde berikutnya.',
     '',
@@ -124,7 +128,7 @@ export function votePrompt({ frame, draft }) {
     '',
     'Draft kesimpulan final dari moderator:',
     '<<<',
-    clip(draft, 8000),
+    clip(draft, DRAFT_LIMIT),
     '>>>',
     '',
     'Ini pemungutan suara terakhir. Nilai apakah draft ini layak jadi kesimpulan sidang:',

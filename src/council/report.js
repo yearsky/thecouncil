@@ -29,6 +29,19 @@ function roundTitle(r) {
   return 'Pemungutan suara akhir'
 }
 
+// Draft moderator bisa memakai judul # atau ##; turunkan levelnya supaya tetap di bawah judul laporan.
+export function demoteHeadings(markdown, levels = 2) {
+  let inFence = false
+  return String(markdown)
+    .split('\n')
+    .map((line) => {
+      if (/^\s*(```|~~~)/.test(line)) inFence = !inFence
+      if (inFence) return line
+      return line.replace(/^(#{1,6})(?=\s)/, (h) => '#'.repeat(Math.min(6, h.length + levels)))
+    })
+    .join('\n')
+}
+
 export function collectClaims(result) {
   const labelOf = Object.fromEntries(result.panel.map((p) => [p.id, p.label]))
   const seen = new Map()
@@ -67,7 +80,7 @@ export function buildReport(result) {
 
   out.push('## Kesimpulan', '')
   if (result.final?.draft) {
-    out.push(result.final.draft, '')
+    out.push(demoteHeadings(result.final.draft), '')
     if (result.status !== 'unanimous') out.push(`> Kesimpulan ini **tidak disetujui bulat**. Lihat suara dan perbedaan pendapat di bawah.`, '')
   } else out.push('_Sidang tidak menghasilkan kesimpulan._', '')
 
@@ -128,7 +141,7 @@ export function buildReport(result) {
     if (r.judged) {
       out.push(`**Moderator:** ${r.judged.summary}`, '')
       if (r.judged.next_focus && r !== result.rounds.at(-1)) out.push(`Fokus berikutnya: ${r.judged.next_focus}`, '')
-      out.push('<details><summary>Draft moderator</summary>', '', r.judged.draft, '', '</details>', '')
+      out.push('<details><summary>Draft moderator</summary>', '', demoteHeadings(r.judged.draft, 3), '', '</details>', '')
     }
   }
 

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { accepts, isReached, tally } from '../src/council/consensus.js'
 import { extractJson, normalizeVote, validateFrame, validateJudge, validatePanelist } from '../src/council/schema.js'
-import { describeResponse, panelPrompt } from '../src/council/prompts.js'
+import { describeResponse, judgePrompt, panelPrompt, votePrompt } from '../src/council/prompts.js'
 
 test('extractJson: JSON polos, berpagar ```json, dan dengan kalimat pembuka', () => {
   assert.deepEqual(extractJson('{"a":1}'), { a: 1 })
@@ -81,4 +81,14 @@ test('panelPrompt: ronde blind tanpa suara; ronde kritik memuat draft, jawaban l
   assert.match(critique, /tidak punya akses web/)
   assert.match(critique, /"vote": \{"on_draft"/)
   assert.match(describeResponse('B', other), /\(sumber: https:\/\/b\)/)
+})
+
+test('draft panjang tidak dipotong saat dinilai panelis (bug dari uji coba sungguhan)', () => {
+  const frame = { question: 'Q?', criteria: [], context: '' }
+  const draft = `awal ${'x'.repeat(20000)} AKHIR-DRAFT`
+  assert.match(panelPrompt({ frame, round: 2, draft }), /AKHIR-DRAFT/)
+  assert.match(votePrompt({ frame, draft }), /AKHIR-DRAFT/)
+  assert.match(judgePrompt({ frame, round: 2, previousDraft: draft, responses: [] }), /AKHIR-DRAFT/)
+  assert.doesNotMatch(panelPrompt({ frame, round: 2, draft }), /\(dipotong\)/)
+  assert.match(judgePrompt({ frame, round: 1, responses: [] }), /maksimal sekitar 1\.000 kata/)
 })
