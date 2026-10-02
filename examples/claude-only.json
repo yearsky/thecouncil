@@ -1,0 +1,11 @@
+{
+  "moderator": { "agent": "claude-opus", "model": "opus" },
+  "panel": ["claude-opus", "claude-sonnet", "claude-haiku"],
+  "maxRounds": 3,
+  "consensus": "unanimous",
+  "agents": {
+    "claude-opus": { "type": "claude-cli", "label": "Claude Opus", "model": "opus", "timeoutMs": 420000 },
+    "claude-sonnet": { "type": "claude-cli", "label": "Claude Sonnet", "model": "sonnet", "timeoutMs": 420000 },
+    "claude-haiku": { "type": "claude-cli", "label": "Claude Haiku", "model": "haiku", "timeoutMs": 420000 }
+  }
+}

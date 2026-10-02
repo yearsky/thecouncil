@@ -4,6 +4,7 @@
   "panel": ["claude", "codex", "deepseek"],
   "maxRounds": 3,
   "consensus": "unanimous",
+  "web": true,
   "agents": {
     "claude": {
       "type": "claude-cli",

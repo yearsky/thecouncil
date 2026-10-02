@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { DEFAULT_CONFIG, loadConfig, mergeConfig, validateConfig } from '../src/config.js'
+import { DEFAULT_CONFIG, applyRunOptions, loadConfig, mergeConfig, validateConfig } from '../src/config.js'
 import { agentIdsInUse } from '../src/agents/index.js'
 
 test('config bawaan: Claude moderator + panelis, panel Claude/Codex/DeepSeek', () => {
@@ -29,13 +29,44 @@ test('validateConfig menolak agen yang tidak ada', () => {
 test('loadConfig: tanpa file pakai bawaan; file dengan BOM (Notepad) tetap terbaca', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-config-'))
   assert.equal(loadConfig({ cwd: dir }).source, null)
-  fs.writeFileSync(path.join(dir, 'council.config.json'), '﻿{"moderator":{"model":"opus"}}')
+  fs.writeFileSync(path.join(dir, 'council.config.json'), '\uFEFF{"moderator":{"model":"opus"}}')
   const c = loadConfig({ cwd: dir })
   assert.equal(c.moderator.model, 'opus')
   assert.equal(c.source, path.join(dir, 'council.config.json'))
   assert.throws(() => loadConfig({ cwd: dir, file: 'tidak-ada.json' }), /tidak ditemukan/)
   fs.writeFileSync(path.join(dir, 'rusak.json'), '{')
   assert.throws(() => loadConfig({ cwd: dir, file: 'rusak.json' }), /Gagal membaca/)
+})
+
+test('applyRunOptions: opsi baris perintah tanpa mengubah config asal', () => {
+  const base = mergeConfig(DEFAULT_CONFIG, {})
+  const { config, errors } = applyRunOptions(base, {
+    panel: 'claude, codex',
+    'moderator-model': 'opus',
+    model: ['codex=gpt-x'],
+    rounds: '2',
+    consensus: 'mayoritas',
+    'no-web': true
+  })
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.panel, ['claude', 'codex'])
+  assert.deepEqual(config.moderator, { agent: 'claude', model: 'opus' })
+  assert.equal(config.agents.codex.model, 'gpt-x')
+  assert.equal(config.maxRounds, 2)
+  assert.equal(config.consensus, 'majority')
+  assert.equal(config.web, false)
+  assert.equal(base.agents.codex.model, '')
+  assert.equal(DEFAULT_CONFIG.moderator.model, 'sonnet')
+
+  const bad = applyRunOptions(base, { model: ['tanpa-sama-dengan', 'x=y'], rounds: '11', consensus: 'semua' })
+  assert.equal(bad.errors.length, 4)
+})
+
+test('contoh config khusus Claude valid', () => {
+  const example = JSON.parse(fs.readFileSync(new URL('../examples/claude-only.json', import.meta.url), 'utf8'))
+  const config = mergeConfig(DEFAULT_CONFIG, example)
+  assert.deepEqual(validateConfig(config), [])
+  assert.ok(config.panel.every((id) => config.agents[id].type === 'claude-cli'))
 })
 
 test('council.config.example.json sama dengan config bawaan', () => {

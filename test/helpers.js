@@ -18,6 +18,41 @@ export function fakeBin(fixture) {
   return cmd
 }
 
+// Agen palsu di dalam proses untuk menguji protokol sidang. Tahap dikenali dari baris "Tahap: ..." di prompt;
+// tiap tahap bisa diganti lewat `script` (objek, string mentah, Error, atau fungsi ({ round, req, n }) => ...).
+const DEFAULT_SCRIPT = {
+  FRAME: { question: 'Q?', criteria: ['k1'], context: '' },
+  PANEL: ({ id, round }) => ({
+    position: `posisi ${id} r${round}`,
+    proposals: [{ title: `ide ${id}` }],
+    claims: [{ text: `klaim ${id}`, kind: 'fact', source_url: `https://${id}.test/a`, quote: 'q' }],
+    ...(round > 1 ? { vote: { on_draft: 'AGREE' } } : {})
+  }),
+  JUDGE: ({ round }) => ({ summary: `ringkas r${round}`, agreements: ['a'], disagreements: [], draft: `draft r${round}`, next_focus: `fokus r${round}` }),
+  VOTE: { vote: { on_draft: 'AGREE' } }
+}
+
+export function scriptedAgent(id, script = {}, { webSearch = false } = {}) {
+  const calls = []
+  return {
+    id,
+    label: id.toUpperCase(),
+    model: `${id}-model`,
+    capabilities: { webSearch },
+    calls,
+    async ask(req) {
+      calls.push(req)
+      const stage = req.prompt.startsWith('Jawabanmu sebelumnya') ? 'REPAIR' : req.prompt.match(/^Tahap: (\w+)/m)?.[1]
+      const round = Number(req.prompt.match(/Ronde (\d+)/)?.[1] || 0)
+      const handler = Object.hasOwn(script, stage) ? script[stage] : DEFAULT_SCRIPT[stage]
+      const value = typeof handler === 'function' ? await handler({ id, round, req, n: calls.length }) : handler
+      if (value instanceof Error) throw value
+      if (value === undefined) throw new Error(`tahap ${stage} tidak ditangani`)
+      return { text: typeof value === 'string' ? value : JSON.stringify(value), costUsd: 0.01 }
+    }
+  }
+}
+
 // Server lokal yang meniru API DeepSeek (format OpenAI) dan halaman sumber untuk uji URL.
 export async function startFakeApi({ models = ['fake-flash', 'fake-pro'], apiKey = 'sk-test' } = {}) {
   const requests = []

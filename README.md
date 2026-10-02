@@ -2,7 +2,12 @@
 
 Sidang debat beberapa agen AI dari terminal Windows: **Claude** (Claude Code CLI), **Codex** (Codex CLI), dan **DeepSeek** (API). Claude memimpin sidang dan juga ikut berdebat. Rencana lengkap ada di [docs/PLAN.md](docs/PLAN.md).
 
-**Status: Fase 0.** Yang sudah ada baru `council doctor`, untuk memeriksa apakah tiap agen siap dipakai. Perintah `council run` dikerjakan di Fase 1.
+**Status: Fase 1.** Yang sudah tersedia:
+
+- `council run`: sidang debat sungguhan.
+- `council doctor`: memeriksa apakah tiap agen siap dipakai.
+
+Pengecekan sumber otomatis menyusul di Fase 2.
 
 ## Kebutuhan
 
@@ -25,6 +30,48 @@ notepad .env
 Di `.env`, isi `DEEPSEEK_API_KEY`. Belum perlu `npm install`, karena proyek ini belum memakai dependensi npm.
 
 Kalau mau perintah `council` bisa dipanggil dari folder mana saja, jalankan `npm link` (opsional).
+
+## Menjalankan sidang
+
+```powershell
+node src/index.js run "Ide hackathon tentang keuangan UMKM yang bisa dibuat dalam 48 jam"
+node src/index.js run "..." --rounds 2 --moderator-model opus
+node src/index.js run "..." --json > events.jsonl     # event per baris, untuk bot WhatsApp
+```
+
+Jalannya sidang:
+
+1. Moderator merumuskan pertanyaan dan kriteria keberhasilan.
+2. **Ronde 1 (blind):** semua panelis menjawab paralel tanpa melihat jawaban yang lain.
+3. Moderator merangkum hasilnya dan menyusun draft kesimpulan.
+4. **Ronde kritik:** panelis membaca draft dan jawaban panelis lain, mengkritik, memperbarui posisinya, lalu memberi suara atas draft.
+5. Sidang berhenti kalau semua setuju. Kalau batas ronde habis dan belum sepakat, ada pemungutan suara akhir, dan hasilnya dilaporkan apa adanya: bulat, mayoritas, atau tidak ada konsensus.
+
+Hasil sidang disimpan di `sessions/<waktu>_<topik>/`:
+
+- `report.md`: kesimpulan, suara, klaim dan sumber, jalannya sidang, pemakaian
+- `events.jsonl`: seluruh kejadian
+
+| Opsi | Arti |
+|---|---|
+| `--rounds <n>` | Maksimal ronde debat sebelum suara akhir (bawaan 3) |
+| `--consensus bulat\|mayoritas` | Sidang boleh berhenti lebih awal kalau sudah bulat, atau cukup mayoritas |
+| `--panel a,b,c` | Pilih panelis dari agen di config |
+| `--moderator <id>`, `--moderator-model <model>` | Pilih agen dan model moderator |
+| `--model <id>=<model>` | Ganti model satu agen, mis. `--model claude=haiku` (boleh diulang) |
+| `--no-web` | Matikan web search |
+
+**Kuota.** Dengan P panelis dan R ronde, paling banyak terjadi 1 + R × (P + 1) + P panggilan. Jumlahnya bertambah kalau ada jawaban yang perlu diperbaiki formatnya. Contohnya, 3 panelis dengan 2 ronde berarti paling banyak 12 panggilan.
+
+### Hanya punya langganan Claude?
+
+Panel bisa diisi Claude dengan model yang berbeda-beda:
+
+```powershell
+node src/index.js run "..." -c examples/claude-only.json
+```
+
+Dengan [examples/claude-only.json](examples/claude-only.json), panelisnya Claude Opus, Sonnet, dan Haiku, dan moderatornya Opus. Setiap panelis adalah panggilan `claude -p` terpisah, tapi semuanya memakai kuota langganan yang sama.
 
 ## Memeriksa agen
 

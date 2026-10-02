@@ -1,6 +1,6 @@
 # The Council — Rencana Implementasi
 
-> Status: **Fase 0**. Kode `council doctor` sudah ada dan menunggu diuji di Windows. Rencana ditulis 2 Oktober 2026.
+> Status: **Fase 1**. `council run` (debat) dan `council doctor` sudah ada. Keduanya sudah dicoba dengan Claude asli di lingkungan cloud, tapi belum di Windows. Rencana ditulis 2 Oktober 2026.
 > Yang ditandai **[cek]** belum aku verifikasi langsung. Cek dulu di Fase 0 sebelum diandalkan.
 
 ## Keputusan
@@ -11,6 +11,7 @@
 | K2 | 2 Okt 2026 | Panel awal: **Claude, Codex, DeepSeek**. Gemini tidak dipakai (lihat F6), tapi bisa ditambahkan nanti sebagai adapter. |
 | K3 | 2 Okt 2026 | Debat dan laporan dalam **Bahasa Indonesia**. |
 | K4 | 2 Okt 2026 | Fase 0 dibuat **tanpa dependensi npm**: `fetch` bawaan Node untuk DeepSeek, `process.loadEnvFile` untuk `.env`, dan warna ANSI sederhana. |
+| K5 | 2 Okt 2026 | Panel boleh berisi **beberapa agen Claude dengan model berbeda** (Opus, Sonnet, Haiku), cukup dengan satu langganan Claude. Contohnya ada di `examples/claude-only.json`. |
 
 ## 1. Tujuan
 
@@ -256,16 +257,24 @@ Config yang dipakai ada di `council.config.example.json`. Intinya:
 `council run --json "<topik>"` mencetak satu event JSON per baris ke stdout:
 
 ```
-{"type":"session_started","id":"...","topic":"...","panel":["claude","codex","deepseek"]}
-{"type":"framed","question":"...","criteria":["..."]}
-{"type":"round_started","round":1,"mode":"blind"}
-{"type":"agent_started","round":1,"agent":"codex"}
-{"type":"agent_finished","round":1,"agent":"codex","position":"...","claims":3,"ms":33000}
-{"type":"agent_failed","round":1,"agent":"deepseek","error":"timeout"}
-{"type":"verified","round":1,"ok":3,"warn":1,"fail":1}
-{"type":"judged","round":1,"draft":"...","agreements":["..."],"disagreements":["..."]}
-{"type":"finished","status":"unanimous|majority|no_consensus|error","summary":"...","report":"sessions/.../report.md"}
+{"type":"session_started","ts":"...","topic":"...","panel":[{"id":"claude","label":"Claude","model":"sonnet"}],"moderator":{"id":"claude","label":"Claude","model":"opus"},"maxRounds":3,"consensus":"unanimous","web":true}
+{"type":"framed","ts":"...","question":"...","criteria":["..."],"context":"..."}
+{"type":"round_started","ts":"...","round":1,"mode":"blind|critique|vote"}
+{"type":"agent_started","ts":"...","round":1,"agent":"codex"}
+{"type":"agent_finished","ts":"...","round":1,"agent":"codex","ms":33000,"repaired":false,"response":{"position":"...","proposals":[],"claims":[],"critiques":[],"changed_mind":{},"vote":{}}}
+{"type":"agent_failed","ts":"...","round":1,"agent":"deepseek","ms":180000,"error":"..."}
+{"type":"judged","ts":"...","round":1,"summary":"...","agreements":["..."],"disagreements":["..."],"draft":"...","next_focus":"..."}
+{"type":"votes","ts":"...","round":2,"draftRound":1,"status":"majority","accepted":["claude","codex"],"rejected":["deepseek"],"total":3,"votes":{},"final":true}
+{"type":"warning","ts":"...","stage":"frame|panel|judge","message":"..."}
+{"type":"finished","ts":"...","status":"unanimous|majority|no_consensus|error","round":2,"summary":"...","draft":"...","usage":{"calls":8},"session":"...","report":"/.../report.md"}
 ```
+
+Catatan:
+
+- `response` di `agent_finished` berisi jawaban panelis yang sudah divalidasi (format di §5). Di pemungutan suara akhir isinya hanya `{"vote": ...}`.
+- `final: true` hanya muncul pada `votes` dari pemungutan suara akhir.
+- Event `verified` (hasil verifier sumber) ditambahkan di Fase 2.
+- Semua event juga disimpan di `sessions/<id>/events.jsonl`.
 
 Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: menambah field boleh, mengganti nama field jangan.
 

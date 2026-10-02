@@ -2,22 +2,39 @@
 // The Council: sidang debat beberapa agen AI dari terminal. Lihat docs/PLAN.md.
 
 import { parseArgs } from 'node:util'
-import { loadConfig, loadEnv, validateConfig } from './config.js'
+import { agentIdsInUse, createAgent } from './agents/index.js'
+import { applyRunOptions, loadConfig, loadEnv, validateConfig } from './config.js'
+import { runCouncil } from './council/protocol.js'
+import { buildReport } from './council/report.js'
 import { formatDoctor, runDoctor } from './doctor.js'
+import { createSession } from './store/session.js'
+import { createTerminalRenderer } from './ui/terminal.js'
 
 const HELP = `The Council — sidang debat agen AI
 
 Pemakaian:
-  council doctor [opsi]     Periksa tiap agen (terpasang, login, uji dasar, web search)
-  council run "<topik>"     Mulai sidang (belum tersedia, dikerjakan di Fase 1)
+  council run "<topik>" [opsi]   Mulai sidang
+  council doctor [opsi]          Periksa tiap agen (terpasang, login, uji dasar, web search)
+
+Opsi run:
+  --rounds <n>                   Maks. ronde debat sebelum suara akhir (bawaan dari config: 3)
+  --consensus <bulat|mayoritas>  Kapan sidang boleh berhenti lebih awal (unanimous|majority)
+  --panel <id,id,...>            Panelis, mis. --panel claude-opus,claude-haiku
+  --moderator <id>               Agen moderator
+  --moderator-model <model>      Model moderator, mis. opus
+  --model <id=model>             Ganti model satu agen (boleh berulang), mis. --model claude=haiku
+  --no-web                       Matikan web search
+  --json                         Cetak event JSON per baris (untuk bot WhatsApp)
 
 Opsi doctor:
-  --quick                   Hanya cek terpasang / API key (tanpa memakai kuota AI)
-  --no-web                  Lewati uji web search
-  --agent <id>              Periksa satu agen saja, mis. --agent codex
-  --json                    Cetak hasil sebagai JSON
-  -c, --config <file>       File config (bawaan: council.config.json)
-  -h, --help                Tampilkan bantuan ini`
+  --quick                        Hanya cek terpasang / API key (tanpa memakai kuota AI)
+  --no-web                       Lewati uji web search
+  --agent <id>                   Periksa satu agen saja, mis. --agent codex
+  --json                         Cetak hasil sebagai JSON
+
+Umum:
+  -c, --config <file>            File config (bawaan: council.config.json)
+  -h, --help                     Tampilkan bantuan ini`
 
 const OPTIONS = {
   config: { type: 'string', short: 'c' },
@@ -25,12 +42,22 @@ const OPTIONS = {
   quick: { type: 'boolean' },
   'no-web': { type: 'boolean' },
   json: { type: 'boolean' },
+  rounds: { type: 'string' },
+  consensus: { type: 'string' },
+  panel: { type: 'string' },
+  moderator: { type: 'string' },
+  'moderator-model': { type: 'string' },
+  model: { type: 'string', multiple: true },
   help: { type: 'boolean', short: 'h' }
 }
 
-async function doctor(values) {
+function readConfig(values) {
   loadEnv()
-  const config = loadConfig({ file: values.config })
+  return loadConfig({ file: values.config })
+}
+
+async function doctor(values) {
+  const config = readConfig(values)
   const errors = validateConfig(config)
   if (values.agent && !Object.hasOwn(config.agents, values.agent)) errors.push(`agen "${values.agent}" tidak ada di config`)
   if (errors.length) {
@@ -43,6 +70,48 @@ async function doctor(values) {
   return report.ok ? 0 : 1
 }
 
+async function run(values, topicParts) {
+  const topic = topicParts.join(' ').trim()
+  if (!topic) {
+    console.error('Topik sidang kosong. Contoh: council run "Ide hackathon tentang keuangan UMKM"')
+    return 2
+  }
+  const { config, errors } = applyRunOptions(readConfig(values), values)
+  errors.push(...validateConfig(config))
+  if (errors.length) {
+    console.error(`Config tidak valid:\n- ${errors.join('\n- ')}`)
+    return 1
+  }
+
+  const agents = Object.fromEntries(agentIdsInUse(config).map((id) => [id, createAgent(id, config.agents[id])]))
+  const session = createSession({ topic, baseDir: config.sessionsDir || 'sessions' })
+  const renderer = values.json ? null : createTerminalRenderer()
+  const emit = (event) => {
+    session.append(event)
+    if (values.json) process.stdout.write(JSON.stringify(event) + '\n')
+    else renderer.handle(event)
+  }
+
+  try {
+    const result = await runCouncil({
+      topic,
+      panel: config.panel.map((id) => agents[id]),
+      moderator: { agent: agents[config.moderator.agent], model: config.moderator.model || undefined },
+      maxRounds: config.maxRounds,
+      consensus: config.consensus,
+      web: config.web,
+      emit,
+      finalize: async (res) => {
+        session.writeReport(buildReport(res))
+        return { session: session.id, report: session.reportPath }
+      }
+    })
+    return result.status === 'error' ? 1 : 0
+  } finally {
+    renderer?.close()
+  }
+}
+
 async function main(argv) {
   let parsed
   try {
@@ -52,7 +121,7 @@ async function main(argv) {
     return 2
   }
   const { values, positionals } = parsed
-  const [command] = positionals
+  const [command, ...rest] = positionals
   if (values.help || !command || command === 'help') {
     console.log(HELP)
     return 0
@@ -61,8 +130,7 @@ async function main(argv) {
     case 'doctor':
       return doctor(values)
     case 'run':
-      console.error('Perintah "run" belum tersedia; dikerjakan di Fase 1 (docs/PLAN.md). Jalankan "council doctor" dulu.')
-      return 1
+      return run(values, rest)
     default:
       console.error(`Perintah tidak dikenal: ${command}\n\n${HELP}`)
       return 2
