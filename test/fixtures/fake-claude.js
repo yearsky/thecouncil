@@ -16,7 +16,7 @@ const source = process.env.FAKE_URL || 'https://example.invalid/x'
 
 function stageAnswer(stage, input) {
   const model = flag('--model') || 'fake'
-  const round = Number(input.match(/Ronde (\d+)/)?.[1] || 0)
+  const round = Number(input.match(/Tahap: \w+ · Ronde (\d+)/)?.[1] || 0)
   const vote = { on_draft: mode === 'disagree' ? 'DISAGREE' : 'AGREE', reservations: [], blocking_objections: mode === 'disagree' ? ['belum ada data'] : [] }
   switch (stage) {
     case 'FRAME':

@@ -6,6 +6,7 @@ import { agentIdsInUse, createAgent } from './agents/index.js'
 import { applyRunOptions, loadConfig, loadEnv, validateConfig } from './config.js'
 import { runCouncil } from './council/protocol.js'
 import { buildReport } from './council/report.js'
+import { createVerifier } from './evidence/verify.js'
 import { formatDoctor, runDoctor } from './doctor.js'
 import { createSession } from './store/session.js'
 import { createTerminalRenderer } from './ui/terminal.js'
@@ -24,6 +25,8 @@ Opsi run:
   --moderator-model <model>      Model moderator, mis. opus
   --model <id=model>             Ganti model satu agen (boleh berulang), mis. --model claude=haiku
   --no-web                       Matikan web search
+  --search-budget <n>            Maks. pencarian web per panelis per ronde (bawaan 3, 0 = tanpa batas)
+  --no-verify                    Jangan periksa sumber klaim
   --json                         Cetak event JSON per baris (untuk bot WhatsApp)
 
 Opsi doctor:
@@ -41,6 +44,8 @@ const OPTIONS = {
   agent: { type: 'string' },
   quick: { type: 'boolean' },
   'no-web': { type: 'boolean' },
+  'no-verify': { type: 'boolean' },
+  'search-budget': { type: 'string' },
   json: { type: 'boolean' },
   rounds: { type: 'string' },
   consensus: { type: 'string' },
@@ -100,6 +105,9 @@ async function run(values, topicParts) {
       maxRounds: config.maxRounds,
       consensus: config.consensus,
       web: config.web,
+      searchBudget: config.searchBudget,
+      devilsAdvocate: config.devilsAdvocate,
+      verify: config.verify ? createVerifier() : null,
       emit,
       finalize: async (res) => {
         session.writeReport(buildReport(res))

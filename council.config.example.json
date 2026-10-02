@@ -5,6 +5,9 @@
   "maxRounds": 3,
   "consensus": "unanimous",
   "web": true,
+  "verify": true,
+  "searchBudget": 3,
+  "devilsAdvocate": true,
   "agents": {
     "claude": {
       "type": "claude-cli",

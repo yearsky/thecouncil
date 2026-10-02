@@ -1,7 +1,8 @@
 // Tampilan sidang di terminal seperti chat. Jawaban agen dicetak utuh saat selesai supaya output paralel
 // tidak bercampur; baris status di bawah menunjukkan agen yang masih berpikir (hanya jika output terminal).
 
-import { STATUS_LABEL } from '../council/report.js'
+import { FLAG_LABEL, STATUS_LABEL } from '../council/report.js'
+import { VERIFY_STATUS } from '../evidence/verify.js'
 import { createStyle } from './style.js'
 
 const VOTE_ICON = { AGREE: '✔', AGREE_WITH_RESERVATIONS: '◐', DISAGREE: '✖' }
@@ -62,9 +63,12 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
     print(`${style.bold(style.cyan(`[${label}]`))} ${style.dim(secs(event.ms) + (event.repaired ? ' · format diperbaiki' : ''))}`)
     if (r.position) print(indent(clip(r.position)))
     for (const p of r.proposals || []) print(`  ${style.bold('▸')} ${p.id}: ${p.title}`)
-    if (r.claims?.length) {
-      const sourced = r.claims.filter((c) => c.source_url).length
-      print(style.dim(`  klaim: ${r.claims.length} (${sourced} dengan sumber)`))
+    if (r.claims?.length || r.cited_claims?.length) {
+      const sourced = (r.claims || []).filter((c) => c.source_url).length
+      const parts = []
+      if (r.claims?.length) parts.push(`${r.claims.map((c) => c.id).join(', ')} (${sourced} dengan sumber)`)
+      if (r.cited_claims?.length) parts.push(`merujuk ${r.cited_claims.join(', ')}`)
+      print(style.dim(`  klaim: ${parts.join(' · ')}`))
     }
     for (const c of (r.critiques || []).filter((c) => c.severity === 'blocking')) print(`  ${style.yellow('kritik')}${c.target ? ` ke ${c.target}` : ''}: ${c.point}`)
     if (r.changed_mind?.changed) print(`  ${style.yellow('berubah pendapat')}: ${r.changed_mind.what}${r.changed_mind.because ? ` (karena ${r.changed_mind.because})` : ''}`)
@@ -80,14 +84,14 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
   function handle(event) {
     switch (event.type) {
       case 'session_started':
-        for (const p of event.panel) labels[p.id] = p.label
+        for (const p of event.panel) labels[p.id] = p.alias ? `${p.label} · ${p.alias}` : p.label
         moderator = `Moderator · ${event.moderator.label}`
         print(style.bold('━━ The Council ━━'))
         print(`Topik: ${event.topic}`)
-        print(style.dim(`Panel: ${event.panel.map((p) => `${p.label}${p.model ? ` (${p.model})` : ''}`).join(' · ')}`))
+        print(style.dim(`Panel: ${event.panel.map((p) => `${p.label}${p.model ? ` (${p.model})` : ''}${p.alias ? ` = ${p.alias}` : ''}`).join(' · ')}`))
         print(
           style.dim(
-            `Moderator: ${event.moderator.label}${event.moderator.model ? ` (${event.moderator.model})` : ''} · maks. ${event.maxRounds} ronde · konsensus: ${event.consensus === 'majority' ? 'mayoritas' : 'bulat'} · web: ${event.web ? 'aktif' : 'mati'}`
+            `Moderator: ${event.moderator.label}${event.moderator.model ? ` (${event.moderator.model})` : ''} · maks. ${event.maxRounds} ronde · konsensus: ${event.consensus === 'majority' ? 'mayoritas' : 'bulat'} · web: ${event.web ? 'aktif' : 'mati'} · verifikasi: ${event.verify ? 'aktif' : 'mati'}`
           )
         )
         print()
@@ -104,8 +108,21 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
       case 'round_started': {
         const title = event.mode === 'blind' ? `Ronde ${event.round} (blind)` : event.mode === 'critique' ? `Ronde ${event.round} (kritik)` : 'Pemungutan suara akhir'
         print(style.bold(`── ${title} ${'─'.repeat(Math.max(3, 40 - title.length))}`))
+        if (event.devilsAdvocate) print(style.dim(`Devil's advocate: ${labels[event.devilsAdvocate] || event.devilsAdvocate}`))
         break
       }
+      case 'verified': {
+        const counts = Object.entries(event.counts)
+          .map(([s, n]) => `${VERIFY_STATUS[s]?.icon || s} ${n}`)
+          .join(' · ')
+        print(`${style.bold('[Verifier]')} ${event.total} klaim dicek: ${counts}`)
+        for (const c of event.claims.filter((c) => c.status === 'unreachable')) print(style.red(`  ${c.id} ❌ ${c.detail}: ${c.source_url}`))
+        print()
+        break
+      }
+      case 'flags':
+        for (const f of event.flags) print(style.yellow(`⚠ ${labels[f.agent] || f.agent}: ${FLAG_LABEL[f.type] || f.type}${f.detail ? ` (${f.detail})` : ''}`))
+        break
       case 'agent_started':
         pending.set(event.agent, Date.now())
         startTimer()

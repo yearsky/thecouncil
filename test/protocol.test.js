@@ -13,6 +13,7 @@ async function council({ panel, moderator = panel[0], moderatorModel = 'mod-mode
     moderator: { agent: moderator, model: moderatorModel },
     emit: (e) => events.push(e),
     clock: CLOCK,
+    random: () => 0.999999, // urutan alias = urutan panel: a = Panelis A, b = Panelis B, …
     ...opts
   })
   return { result, events, types: events.map((e) => e.type) }
@@ -43,10 +44,10 @@ test('semua setuju di ronde 2 → bulat, kesimpulan = draft ronde 1', async () =
   assert.equal(events[0].ts, '2026-10-02T08:00:00.000Z')
 
   // Moderator (agen a) dipanggil untuk FRAME dan JUDGE dengan model moderator; sebagai panelis tanpa model khusus.
-  const modCalls = panel[0].calls.filter((c) => /^Tahap: (FRAME|JUDGE)/.test(c.prompt))
+  const modCalls = panel[0].calls.filter((c) => /^Tahap: (FRAME|JUDGE)/m.test(c.prompt))
   assert.equal(modCalls.length, 2)
   assert.ok(modCalls.every((c) => c.model === 'mod-model'))
-  assert.ok(panel[0].calls.filter((c) => c.prompt.startsWith('Tahap: PANEL')).every((c) => c.model === undefined))
+  assert.ok(panel[0].calls.filter((c) => /^Tahap: PANEL/m.test(c.prompt)).every((c) => c.model === undefined))
   assert.equal(result.usage.calls, 8)
   assert.equal(result.usage.costUsd.toFixed(2), '0.08')
 })
@@ -54,12 +55,12 @@ test('semua setuju di ronde 2 → bulat, kesimpulan = draft ronde 1', async () =
 test('ronde kritik: panelis melihat draft, posisinya sendiri, dan jawaban panelis lain', async () => {
   const panel = ['a', 'b'].map((id) => scriptedAgent(id))
   await council({ panel })
-  const round2 = panel[0].calls.find((c) => c.prompt.startsWith('Tahap: PANEL · Ronde 2'))
+  const round2 = panel[0].calls.find((c) => /^Tahap: PANEL · Ronde 2/m.test(c.prompt))
   assert.match(round2.prompt, /draft r1/)
   assert.match(round2.prompt, /Fokus ronde ini dari moderator: fokus r1/)
   assert.match(round2.prompt, /Posisimu di ronde sebelumnya:\n<<<\nposisi a r1/)
-  assert.match(round2.prompt, /## B\nPosisi: posisi b r1/)
-  assert.doesNotMatch(round2.prompt, /## A\n/)
+  assert.match(round2.prompt, /## Panelis B\nPosisi: posisi b r1/)
+  assert.doesNotMatch(round2.prompt, /## Panelis A\n/)
 })
 
 test('tidak pernah sepakat → suara akhir setelah batas ronde → tidak ada konsensus', async () => {
@@ -113,9 +114,9 @@ test('panelis gagal di ronde 1 tapi pulih di ronde 2 → tetap bisa bulat', asyn
   const panel = [flaky, scriptedAgent('b')]
   const { result, events } = await council({ panel, moderator: panel[1] })
   assert.equal(events.find((e) => e.type === 'agent_failed').error, 'Claude tidak merespons dalam 300 detik')
-  const judgeCall = panel[1].calls.find((c) => c.prompt.startsWith('Tahap: JUDGE'))
-  assert.match(judgeCall.prompt, /## A\nGagal menjawab di ronde ini\./)
-  const round2 = flaky.calls.find((c) => c.prompt.startsWith('Tahap: PANEL · Ronde 2'))
+  const judgeCall = panel[1].calls.find((c) => /^Tahap: JUDGE/m.test(c.prompt))
+  assert.match(judgeCall.prompt, /## Panelis A\nGagal menjawab di ronde ini\./)
+  const round2 = flaky.calls.find((c) => /^Tahap: PANEL · Ronde 2/m.test(c.prompt))
   assert.doesNotMatch(round2.prompt, /Posisimu di ronde sebelumnya/)
   assert.equal(result.status, 'unanimous')
 })
@@ -127,7 +128,7 @@ test('semua panelis gagal → status error', async () => {
   assert.equal(result.status, 'error')
   assert.equal(events.at(-1).status, 'error')
   assert.ok(events.some((e) => e.type === 'warning' && e.stage === 'panel'))
-  assert.equal(mod.calls.filter((c) => c.prompt.startsWith('Tahap: JUDGE')).length, 0)
+  assert.equal(mod.calls.filter((c) => /^Tahap: JUDGE/m.test(c.prompt)).length, 0)
 })
 
 test('moderator gagal merumuskan → topik dipakai apa adanya, sidang tetap jalan', async () => {
@@ -142,9 +143,9 @@ test('web search hanya untuk agen yang mendukung, tidak saat suara akhir, dan bi
   const webby = scriptedAgent('a', { PANEL: disagreeAfterRound1, VOTE: { vote: { on_draft: 'DISAGREE' } } }, { webSearch: true })
   const plain = scriptedAgent('b')
   await council({ panel: [webby, plain], moderator: plain, maxRounds: 1 })
-  assert.equal(webby.calls.find((c) => c.prompt.startsWith('Tahap: PANEL')).webSearch, true)
-  assert.equal(webby.calls.find((c) => c.prompt.startsWith('Tahap: VOTE')).webSearch, false)
-  assert.equal(plain.calls.find((c) => c.prompt.startsWith('Tahap: PANEL')).webSearch, false)
+  assert.equal(webby.calls.find((c) => /^Tahap: PANEL/m.test(c.prompt)).webSearch, true)
+  assert.equal(webby.calls.find((c) => /^Tahap: VOTE/m.test(c.prompt)).webSearch, false)
+  assert.equal(plain.calls.find((c) => /^Tahap: PANEL/m.test(c.prompt)).webSearch, false)
 
   const off = scriptedAgent('c', {}, { webSearch: true })
   await council({ panel: [off], web: false, maxRounds: 1 })

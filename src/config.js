@@ -14,6 +14,9 @@ export const DEFAULT_CONFIG = {
   maxRounds: 3,
   consensus: 'unanimous',
   web: true,
+  verify: true,
+  searchBudget: 3,
+  devilsAdvocate: true,
   agents: {
     claude: { type: 'claude-cli', bin: 'claude', model: 'sonnet', timeoutMs: 300000, extraArgs: [] },
     codex: { type: 'codex-cli', bin: 'codex', model: '', timeoutMs: 300000, webSearchArgs: ['-c', 'web_search=live'], extraArgs: [] },
@@ -92,5 +95,11 @@ export function applyRunOptions(base, values) {
     else config.consensus = mode
   }
   if (values['no-web']) config.web = false
+  if (values['no-verify']) config.verify = false
+  if (values['search-budget'] !== undefined) {
+    const n = Number(values['search-budget'])
+    if (!Number.isInteger(n) || n < 0 || n > 20) errors.push('--search-budget harus bilangan bulat 0–20 (0 = tanpa batas)')
+    else config.searchBudget = n
+  }
   return { config, errors }
 }

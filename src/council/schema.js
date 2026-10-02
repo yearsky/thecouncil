@@ -35,7 +35,8 @@ export function normalizeVote(vote) {
   return {
     on_draft: onDraft,
     reservations: strList(vote.reservations),
-    blocking_objections: strList(vote.blocking_objections)
+    blocking_objections: strList(vote.blocking_objections),
+    change_reason: str(vote.change_reason)
   }
 }
 
@@ -64,10 +65,12 @@ export function validatePanelist(obj, { expectVote = false } = {}) {
     .map((c) => (typeof c === 'string' ? { target: '', point: c.trim(), severity: 'minor' } : { target: str(c?.target), point: str(c?.point), severity: str(c?.severity).toLowerCase() === 'blocking' ? 'blocking' : 'minor' }))
     .filter((c) => c.point)
   const cm = obj.changed_mind && typeof obj.changed_mind === 'object' ? obj.changed_mind : {}
+  const cited = strList(obj.cited_claims).map((id) => id.toUpperCase()).filter((id) => /^K\d+$/.test(id))
   const result = {
     position,
     proposals,
     claims,
+    cited_claims: [...new Set(cited)],
     critiques,
     changed_mind: { changed: cm.changed === true, what: str(cm.what), because: str(cm.because) }
   }

@@ -1,6 +1,8 @@
 // Agen: API yang kompatibel dengan format OpenAI (dipakai untuk DeepSeek), lewat fetch bawaan Node.
 // Bayar per token dengan API key dari .env.
 
+import { fromOpenAiUsage } from './usage.js'
+
 export function createOpenAiCompatAgent({
   id = 'deepseek',
   label = 'DeepSeek',
@@ -59,7 +61,12 @@ export function createOpenAiCompatAgent({
         body: { model: useModel, messages, stream: false },
         timeoutMs: t
       })
-      return { text: data?.choices?.[0]?.message?.content ?? '', usage: data?.usage, meta: { model: data?.model || useModel } }
+      return {
+        text: data?.choices?.[0]?.message?.content ?? '',
+        usage: data?.usage,
+        tokens: fromOpenAiUsage(data?.usage),
+        meta: { model: data?.model || useModel }
+      }
     }
   }
 }

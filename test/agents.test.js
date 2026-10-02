@@ -29,11 +29,12 @@ test('parseClaudeStream membaca init, pemakaian tool, dan hasil', () => {
     'baris bukan json',
     JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', name: 'WebSearch' }] } }),
     JSON.stringify({ type: 'assistant', parent_tool_use_id: 'sub', message: { content: [{ type: 'tool_use', name: 'Bash' }] } }),
-    JSON.stringify({ type: 'result', is_error: false, result: 'halo', total_cost_usd: 0.01 })
+    JSON.stringify({ type: 'result', is_error: false, result: 'halo', total_cost_usd: 0.01, usage: { input_tokens: 5, cache_read_input_tokens: 50, output_tokens: 3 } })
   ].join('\n')
   const r = parseClaudeStream(stdout)
   assert.equal(r.text, 'halo')
   assert.equal(r.costUsd, 0.01)
+  assert.deepEqual(r.tokens, { input: 5, cacheRead: 50, cacheWrite: 0, output: 3 })
   assert.deepEqual(r.meta, { model: 'm1', tools: ['WebSearch'], plugins: ['p'], mcpServers: [], toolUses: { WebSearch: 1 } })
 
   assert.throws(() => parseClaudeStream('{"type":"result","is_error":true,"result":"limit"}'), /Claude error: limit/)

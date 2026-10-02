@@ -46,7 +46,9 @@ test('applyRunOptions: opsi baris perintah tanpa mengubah config asal', () => {
     model: ['codex=gpt-x'],
     rounds: '2',
     consensus: 'mayoritas',
-    'no-web': true
+    'no-web': true,
+    'no-verify': true,
+    'search-budget': '0'
   })
   assert.deepEqual(errors, [])
   assert.deepEqual(config.panel, ['claude', 'codex'])
@@ -55,11 +57,13 @@ test('applyRunOptions: opsi baris perintah tanpa mengubah config asal', () => {
   assert.equal(config.maxRounds, 2)
   assert.equal(config.consensus, 'majority')
   assert.equal(config.web, false)
+  assert.equal(config.verify, false)
+  assert.equal(config.searchBudget, 0)
   assert.equal(base.agents.codex.model, '')
   assert.equal(DEFAULT_CONFIG.moderator.model, 'sonnet')
 
-  const bad = applyRunOptions(base, { model: ['tanpa-sama-dengan', 'x=y'], rounds: '11', consensus: 'semua' })
-  assert.equal(bad.errors.length, 4)
+  const bad = applyRunOptions(base, { model: ['tanpa-sama-dengan', 'x=y'], rounds: '11', consensus: 'semua', 'search-budget': '2.5' })
+  assert.equal(bad.errors.length, 5)
 })
 
 test('contoh config khusus Claude valid', () => {

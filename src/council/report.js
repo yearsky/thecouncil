@@ -1,5 +1,8 @@
 // Laporan Markdown dari hasil runCouncil(). Disusun oleh kode dari data terstruktur, bukan ditulis ulang oleh AI.
 
+import { totalInput } from '../agents/usage.js'
+import { VERIFY_STATUS } from '../evidence/verify.js'
+
 export const STATUS_LABEL = {
   unanimous: '✔ BULAT',
   majority: '◐ MAYORITAS',
@@ -13,8 +16,18 @@ export const VOTE_LABEL = {
   DISAGREE: '✖ tidak setuju'
 }
 
+export const FLAG_LABEL = {
+  contradictory_vote: 'menyatakan setuju tapi tetap menulis keberatan pemblokir (dihitung tidak setuju)',
+  unexplained_flip: 'suara berubah tanpa penjelasan',
+  change_without_reason: 'berubah pendapat tanpa menyebut bukti atau alasan',
+  unknown_citation: 'merujuk ID klaim yang tidak ada'
+}
+
+const STAGE_LABEL = { frame: 'Merumuskan pertanyaan', panel: 'Jawaban panelis', judge: 'Rangkuman moderator', vote: 'Suara akhir', repair: 'Perbaikan format JSON' }
+
 const cell = (text) => String(text ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
 const secs = (ms) => `${(ms / 1000).toFixed(1)} dtk`
+const num = (n) => Math.round(n).toLocaleString('id-ID')
 const who = (p) => `${p.label}${p.model ? ` (${p.model})` : ''}`
 
 function formatTime(iso) {
@@ -42,21 +55,15 @@ export function demoteHeadings(markdown, levels = 2) {
     .join('\n')
 }
 
-export function collectClaims(result) {
-  const labelOf = Object.fromEntries(result.panel.map((p) => [p.id, p.label]))
-  const seen = new Map()
-  for (const r of result.rounds) {
-    for (const [id, res] of Object.entries(r.results)) {
-      for (const c of res.response?.claims || []) {
-        const key = `${c.text.toLowerCase()}|${c.source_url}`
-        if (!seen.has(key)) seen.set(key, { ...c, by: labelOf[id], round: r.round })
-      }
-    }
-  }
-  return [...seen.values()]
+function verificationCell(c) {
+  if (!c.verification) return '· belum dicek'
+  const s = VERIFY_STATUS[c.verification.status]
+  return `${s?.icon || '?'} ${c.verification.detail || s?.label || c.verification.status}`
 }
 
 export function buildReport(result) {
+  const labelOf = Object.fromEntries(result.panel.map((p) => [p.id, p.label]))
+  const nameWithAlias = (id) => `${labelOf[id] || id}${result.aliases?.[id] ? ` (${result.aliases[id]})` : ''}`
   const minutes = Math.max(1, Math.round((new Date(result.finishedAt) - new Date(result.startedAt)) / 60000))
   const debateRounds = result.rounds.filter((r) => r.mode !== 'vote').length
   const out = []
@@ -64,11 +71,12 @@ export function buildReport(result) {
   out.push('| | |', '|---|---|')
   out.push(`| Topik | ${cell(result.topic)} |`)
   out.push(`| Status | ${STATUS_LABEL[result.status] || result.status} |`)
-  out.push(`| Panel | ${cell(result.panel.map(who).join(', '))} |`)
+  out.push(`| Panel | ${cell(result.panel.map((p) => `${who(p)}${p.alias ? ` = ${p.alias}` : ''}`).join(', '))} |`)
   out.push(`| Moderator | ${cell(who(result.moderator))} |`)
   out.push(`| Ronde debat | ${debateRounds} dari maks. ${result.maxRounds}${result.rounds.some((r) => r.mode === 'vote') ? ' + suara akhir' : ''} |`)
   out.push(`| Aturan konsensus | ${result.consensus === 'majority' ? 'mayoritas' : 'bulat'} |`)
   out.push(`| Web search | ${result.web ? 'aktif untuk agen yang mendukung' : 'mati'} |`)
+  out.push(`| Verifikasi sumber | ${result.verify ? 'aktif (oleh program)' : 'mati'} |`)
   out.push(`| Waktu | ${formatTime(result.startedAt)}, sekitar ${minutes} menit |`, '')
 
   if (result.frame.criteria.length || result.frame.context) {
@@ -90,11 +98,12 @@ export function buildReport(result) {
     for (const p of result.panel) {
       const v = result.decided.votes[p.id]
       if (!v) {
-        out.push(`| ${cell(p.label)} | – gagal menjawab | |`)
+        out.push(`| ${cell(nameWithAlias(p.id))} | – gagal menjawab | |`)
         continue
       }
       const notes = [...v.blocking_objections.map((o) => `**Keberatan:** ${o}`), ...v.reservations.map((r) => `Catatan: ${r}`)]
-      out.push(`| ${cell(p.label)} | ${VOTE_LABEL[v.on_draft]} | ${cell(notes.join('\n'))} |`)
+      if (v.change_reason) notes.push(`Alasan berubah: ${v.change_reason}`)
+      out.push(`| ${cell(nameWithAlias(p.id))} | ${VOTE_LABEL[v.on_draft]} | ${cell(notes.join('\n'))} |`)
     }
     out.push('')
   }
@@ -102,14 +111,29 @@ export function buildReport(result) {
   if (result.final?.agreements?.length) out.push('## Poin yang disepakati', '', ...result.final.agreements.map((a) => `- ${a}`), '')
   if (result.final?.disagreements?.length) out.push('## Perbedaan pendapat', '', ...result.final.disagreements.map((d) => `- ${d}`), '')
 
-  const claims = collectClaims(result)
+  if (result.flags?.length) {
+    out.push('## Catatan integritas', '')
+    out.push('> Dicatat oleh program. Tidak mengubah hasil suara, kecuali "setuju tapi menulis keberatan pemblokir" yang dihitung tidak setuju.', '')
+    for (const f of result.flags) {
+      out.push(`- Ronde ${f.round}: ${nameWithAlias(f.agent)} ${FLAG_LABEL[f.type] || f.type}${f.detail ? ` (${f.detail})` : ''}`)
+    }
+    out.push('')
+  }
+
+  const claims = result.claims || []
   if (claims.length) {
     out.push('## Klaim dan sumber', '')
-    out.push('> Belum diverifikasi otomatis. Pengecekan sumber oleh kode dikerjakan di Fase 2; periksa sendiri sebelum dipakai.', '')
-    out.push('| Klaim | Jenis | Sumber | Oleh |', '|---|---|---|---|')
+    if (result.verify) {
+      const counts = {}
+      for (const c of claims) if (c.verification) counts[c.verification.status] = (counts[c.verification.status] || 0) + 1
+      const summary = Object.entries(counts).map(([s, n]) => `${VERIFY_STATUS[s]?.icon || s} ${n}`).join(' · ')
+      out.push(`> Diperiksa oleh program: halaman sumber dibuka dan kutipannya dicari. ${summary || 'Belum ada yang diperiksa.'}`)
+      out.push('> ❔ berarti tidak bisa dicek otomatis (mis. situs memblokir bot atau berupa PDF), bukan berarti salah.', '')
+    } else out.push('> Verifikasi sumber dimatikan; klaim di bawah belum diperiksa.', '')
+    out.push('| ID | Klaim | Jenis | Sumber | Verifikasi | Oleh |', '|---|---|---|---|---|---|')
     for (const c of claims) {
       const source = c.source_url ? `${c.source_url}${c.quote ? `<br>"${c.quote}"` : ''}` : '–'
-      out.push(`| ${cell(c.text)} | ${c.kind} | ${cell(source)} | ${cell(`${c.by}, ronde ${c.round}`)} |`)
+      out.push(`| ${c.id} | ${cell(c.text)} | ${c.kind} | ${cell(source)} | ${cell(verificationCell(c))} | ${cell(`${c.by.map((id) => labelOf[id] || id).join(', ')}; ronde ${c.rounds.join(', ')}`)} |`)
     }
     out.push('')
   }
@@ -117,23 +141,27 @@ export function buildReport(result) {
   out.push('## Jalannya sidang', '')
   for (const r of result.rounds) {
     out.push(`### ${roundTitle(r)}`, '')
+    if (r.devilsAdvocate) out.push(`Devil's advocate: ${nameWithAlias(r.devilsAdvocate)}`, '')
     for (const p of result.panel) {
       const res = r.results[p.id]
       if (!res) continue
       if (!res.ok) {
-        out.push(`#### ${p.label} — gagal (${secs(res.ms)})`, '', `\`${res.error}\``, '')
+        out.push(`#### ${nameWithAlias(p.id)} — gagal (${secs(res.ms)})`, '', `\`${res.error}\``, '')
         continue
       }
       const x = res.response
-      out.push(`#### ${p.label} · ${secs(res.ms)}${res.repaired ? ' · format diperbaiki' : ''}`, '')
+      out.push(`#### ${nameWithAlias(p.id)} · ${secs(res.ms)}${res.repaired ? ' · format diperbaiki' : ''}`, '')
       if (x.position) out.push(x.position, '')
       if (x.proposals?.length) out.push(...x.proposals.map((pr) => `- **${pr.id}: ${pr.title}**${pr.why ? ` — ${pr.why}` : ''}`), '')
+      const ids = [...new Set([...(x.claims || []).map((c) => c.id), ...(x.cited_claims || [])])]
+      if (ids.length) out.push(`Klaim: ${ids.join(', ')}`, '')
       if (x.critiques?.length) out.push('Kritik:', ...x.critiques.map((c) => `- [${c.severity}]${c.target ? ` ${c.target}:` : ''} ${c.point}`), '')
       if (x.changed_mind?.changed) out.push(`Berubah pendapat: ${x.changed_mind.what} (karena: ${x.changed_mind.because || 'tidak disebutkan'})`, '')
       if (x.vote) {
         out.push(`Suara: ${VOTE_LABEL[x.vote.on_draft]}`)
         for (const o of x.vote.blocking_objections) out.push(`- Keberatan: ${o}`)
         for (const n of x.vote.reservations) out.push(`- Catatan: ${n}`)
+        if (x.vote.change_reason) out.push(`- Alasan berubah: ${x.vote.change_reason}`)
         out.push('')
       }
     }
@@ -145,11 +173,25 @@ export function buildReport(result) {
     }
   }
 
+  out.push(...usageSection(result, labelOf))
+  return out.join('\n')
+}
+
+function usageSection(result, labelOf) {
   const u = result.usage
-  out.push('## Pemakaian', '')
+  const out = ['## Pemakaian', '']
   out.push(`- Panggilan AI: ${u.calls}${u.failedCalls ? ` (${u.failedCalls} gagal)` : ''}; total durasi panggilan ${Math.round(u.ms / 1000)} dtk (sebagian berjalan paralel)`)
   if (u.costUsd) out.push(`- \`total_cost_usd\` menurut Claude Code: $${u.costUsd.toFixed(4)}. Ini estimasi sisi klien, bukan tagihan.`)
-  if (u.tokens) out.push(`- Token API (agen berbasis API): ${u.tokens}`)
+  if (u.measured) {
+    out.push(`- Token terukur untuk ${u.measured} dari ${u.calls} panggilan (Codex CLI belum melaporkan token).`, '')
+    const row = (name, b) =>
+      `| ${cell(name)} | ${b.calls} | ${num(totalInput(b.tokens))} | ${num(b.tokens.cacheRead)} | ${num(b.tokens.output)} | ${b.costUsd ? `$${b.costUsd.toFixed(4)}` : '–'} |`
+    out.push('| Peran | Panggilan | Token input | dari cache | Token output | Estimasi biaya |', '|---|---|---|---|---|---|')
+    for (const [role, b] of Object.entries(u.byRole)) out.push(row(role === 'moderator' ? `Moderator (${result.moderator.label})` : `${labelOf[role] || role} (panelis)`, b))
+    out.push('')
+    out.push('| Tahap | Panggilan | Token input | dari cache | Token output | Estimasi biaya |', '|---|---|---|---|---|---|')
+    for (const [stage, b] of Object.entries(u.byStage)) out.push(row(STAGE_LABEL[stage] || stage, b))
+  }
   out.push('')
-  return out.join('\n')
+  return out
 }

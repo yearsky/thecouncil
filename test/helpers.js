@@ -43,12 +43,12 @@ export function scriptedAgent(id, script = {}, { webSearch = false } = {}) {
     async ask(req) {
       calls.push(req)
       const stage = req.prompt.startsWith('Jawabanmu sebelumnya') ? 'REPAIR' : req.prompt.match(/^Tahap: (\w+)/m)?.[1]
-      const round = Number(req.prompt.match(/Ronde (\d+)/)?.[1] || 0)
+      const round = Number(req.prompt.match(/Tahap: \w+ · Ronde (\d+)/)?.[1] || 0)
       const handler = Object.hasOwn(script, stage) ? script[stage] : DEFAULT_SCRIPT[stage]
       const value = typeof handler === 'function' ? await handler({ id, round, req, n: calls.length }) : handler
       if (value instanceof Error) throw value
       if (value === undefined) throw new Error(`tahap ${stage} tidak ditangani`)
-      return { text: typeof value === 'string' ? value : JSON.stringify(value), costUsd: 0.01 }
+      return { text: typeof value === 'string' ? value : JSON.stringify(value), costUsd: 0.01, tokens: { input: 100, cacheRead: 20, cacheWrite: 0, output: 10 } }
     }
   }
 }

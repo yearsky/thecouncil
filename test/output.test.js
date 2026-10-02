@@ -1,12 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runCouncil } from '../src/council/protocol.js'
-import { buildReport, collectClaims, demoteHeadings } from '../src/council/report.js'
+import { buildReport, demoteHeadings } from '../src/council/report.js'
 import { createSession, slugify, stamp } from '../src/store/session.js'
 import { createTerminalRenderer } from '../src/ui/terminal.js'
 import { createStyle } from '../src/ui/style.js'
@@ -23,6 +23,7 @@ async function sampleRun(panel, opts = {}) {
     moderator: { agent: panel[0], model: 'opus' },
     emit: (e) => events.push(e),
     clock: () => new Date((t += 60000)),
+    random: () => 0.999999,
     ...opts
   })
   return { result, events }
@@ -55,14 +56,17 @@ test('laporan: status, kesimpulan, tabel suara, klaim (karakter | di-escape), da
   assert.match(md, /\| Topik \| Ide hackathon \\\| UMKM \|/)
   assert.match(md, /\| Status \| ✔ BULAT \|/)
   assert.match(md, /\| Moderator \| A \(opus\) \|/)
+  assert.match(md, /\| Panel \| A \(a-model\) = Panelis A, B \(b-model\) = Panelis B \|/)
   assert.match(md, /## Kesimpulan\n\ndraft r1\n/)
-  assert.match(md, /\| B \| ◐ setuju dengan catatan \| Catatan: perlu data BPS \|/)
-  assert.match(md, /\| klaim \\\| pipa \| estimate \| – \| B, ronde 1 \|/)
+  assert.match(md, /\| B \(Panelis B\) \| ◐ setuju dengan catatan \| Catatan: perlu data BPS \|/)
+  assert.match(md, /\| K\d \| klaim \\\| pipa \| estimate \| – \| · belum dicek \| B; ronde 1, 2 \|/)
   assert.match(md, /https:\/\/a\.test\/a<br>"q"/)
-  assert.match(md, /### Ronde 1 \(blind\)[\s\S]*#### A · [\d.]+ dtk[\s\S]*### Ronde 2 \(kritik\)/)
-  assert.match(md, /Belum diverifikasi otomatis/)
+  assert.match(md, /### Ronde 1 \(blind\)[\s\S]*#### A \(Panelis A\) · [\d.]+ dtk[\s\S]*### Ronde 2 \(kritik\)/)
+  assert.match(md, /Verifikasi sumber \| mati/)
   assert.match(md, /- Panggilan AI: 6;/)
-  assert.equal(collectClaims(result).length, 2) // klaim yang sama di ronde 2 tidak diulang
+  assert.match(md, /\| B \(panelis\) \| 2 \| 240 \| 40 \| 20 \| \$0\.0200 \|/)
+  assert.match(md, /\| Rangkuman moderator \| 1 \|/)
+  assert.equal(result.claims.length, 2) // klaim yang sama di ronde 2 tidak diulang
 })
 
 test('demoteHeadings menurunkan judul di luar blok kode', () => {
@@ -96,10 +100,10 @@ test('tampilan terminal mencetak jalannya sidang seperti chat', async () => {
   r.handle({ type: 'finished', status: 'majority', round: 3, decidedBy: 'vote', summary: '' })
   r.close()
   assert.match(text, /━━ The Council ━━\nTopik: Ide hackathon \| UMKM/)
-  assert.match(text, /Panel: A \(a-model\) · B \(b-model\)/)
+  assert.match(text, /Panel: A \(a-model\) = Panelis A · B \(b-model\) = Panelis B/)
   assert.match(text, /\[Moderator · A\] Pertanyaan: Q\?\n  • k1/)
   assert.match(text, /── Ronde 1 \(blind\)/)
-  assert.match(text, /\[B\] [\d.]+ dtk\n  posisi b r1\n  ▸ P1: ide b\n  klaim: 1 \(1 dengan sumber\)/)
+  assert.match(text, /\[B · Panelis B\] [\d.]+ dtk\n  posisi b r1\n  ▸ P1: ide b\n  klaim: K\d \(1 dengan sumber\)/)
   assert.match(text, /suara: ✔ AGREE/)
   assert.match(text, /Suara atas draft ronde 1: 2\/2 setuju → BULAT/)
   assert.match(text, /━━ Hasil: ✔ BULAT \(ronde 2\) ━━\nringkas r1\nLaporan: sessions\/x\/report\.md/)
@@ -120,14 +124,21 @@ test('council run end-to-end lewat CLI dengan Claude palsu (--json)', async (t) 
     }
   }
   fs.writeFileSync(path.join(dir, 'council.config.json'), JSON.stringify(config))
+  // Asinkron (bukan spawnSync) supaya server palsu di proses ini tetap bisa menjawab verifier di proses anak.
   const run = (args, env = {}) =>
-    spawnSync(process.execPath, [path.join(ROOT, 'src/index.js'), 'run', ...args], {
-      cwd: dir,
-      encoding: 'utf8',
-      env: { ...process.env, FAKE_URL: `${api.url}/source`, ...env }
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(ROOT, 'src/index.js'), 'run', ...args], {
+        cwd: dir,
+        env: { ...process.env, FAKE_URL: `${api.url}/source`, ...env }
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.on('data', (d) => (stdout += d))
+      child.stderr.on('data', (d) => (stderr += d))
+      child.on('close', (status) => resolve({ status, stdout, stderr }))
     })
 
-  const ok = run(['Ide hackathon UMKM', '--json', '--rounds', '2'])
+  const ok = await run(['Ide hackathon UMKM', '--json', '--rounds', '2'])
   assert.equal(ok.status, 0, ok.stderr)
   const events = ok.stdout.trim().split('\n').map((l) => JSON.parse(l))
   assert.equal(events[0].type, 'session_started')
@@ -135,21 +146,25 @@ test('council run end-to-end lewat CLI dengan Claude palsu (--json)', async (t) 
   const last = events.at(-1)
   assert.equal(last.type, 'finished')
   assert.equal(last.status, 'unanimous')
+  // Verifier sungguhan membuka halaman sumber palsu dan menemukan kutipannya.
+  assert.ok(events.some((e) => e.type === 'verified'))
+  assert.equal(last.verification.verified, 1)
   assert.ok(fs.existsSync(last.report))
   assert.match(fs.readFileSync(last.report, 'utf8'), /Draft kesimpulan ronde 1/)
   const saved = fs.readFileSync(path.join(path.dirname(last.report), 'events.jsonl'), 'utf8').trim().split('\n')
   assert.equal(saved.length, events.length)
 
-  const disagree = run(['Ide hackathon', '--json', '--rounds', '1', '--model', 'haiku=sonnet'], { FAKE_CLAUDE_MODE: 'disagree' })
+  const disagree = await run(['Ide hackathon', '--json', '--rounds', '1', '--model', 'haiku=sonnet', '--no-verify'], { FAKE_CLAUDE_MODE: 'disagree' })
   assert.equal(disagree.status, 0, disagree.stderr)
   const devents = disagree.stdout.trim().split('\n').map((l) => JSON.parse(l))
   assert.equal(devents.at(-1).status, 'no_consensus')
   assert.equal(devents[0].panel[1].model, 'sonnet')
 
-  const bad = run(['topik', '--rounds', '0', '--model', 'gemini=x'])
+  const bad = await run(['topik', '--rounds', '0', '--model', 'gemini=x', '--search-budget=-1'])
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /--rounds harus bilangan bulat/)
   assert.match(bad.stderr, /--model "gemini=x"/)
+  assert.match(bad.stderr, /--search-budget harus/)
 
-  assert.equal(run([]).status, 2)
+  assert.equal((await run([])).status, 2)
 })

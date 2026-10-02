@@ -2,6 +2,7 @@
 // Jangan pakai --bare: mode itu tidak membaca login langganan (docs/PLAN.md, F2).
 
 import { cliVersion, runCli } from './cli.js'
+import { fromAnthropicUsage } from './usage.js'
 
 export const WEB_TOOLS = 'WebSearch,WebFetch'
 
@@ -61,6 +62,7 @@ export function parseClaudeStream(stdout) {
     text: typeof result.result === 'string' ? result.result : '',
     costUsd: result.total_cost_usd,
     usage: result.usage,
+    tokens: fromAnthropicUsage(result.usage),
     meta: {
       model: init?.model,
       tools: init?.tools,
