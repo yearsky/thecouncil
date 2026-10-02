@@ -77,3 +77,18 @@ test('council.config.example.json sama dengan config bawaan', () => {
   const example = JSON.parse(fs.readFileSync(new URL('../council.config.example.json', import.meta.url), 'utf8'))
   assert.deepEqual(mergeConfig(DEFAULT_CONFIG, example), mergeConfig(DEFAULT_CONFIG, {}))
 })
+
+test('effort: digabung per tahap, divalidasi, dan bisa diganti lewat --effort', () => {
+  const merged = mergeConfig(DEFAULT_CONFIG, { effort: { vote: 'low' } })
+  assert.deepEqual(merged.effort, { frame: '', panel: '', judge: '', vote: 'low', repair: 'low' })
+  assert.deepEqual(validateConfig(merged), [])
+  const bad = mergeConfig(DEFAULT_CONFIG, { effort: { vote: 'sangat-rendah', tidur: 'low' } })
+  assert.equal(validateConfig(bad).length, 2)
+
+  const { config, errors } = applyRunOptions(merged, { effort: ['judge=high', 'vote='] })
+  assert.deepEqual(errors, [])
+  assert.equal(config.effort.judge, 'high')
+  assert.equal(config.effort.vote, '')
+  assert.equal(merged.effort.judge, '')
+  assert.equal(applyRunOptions(merged, { effort: ['tanpa-sama-dengan', 'x=low'] }).errors.length, 2)
+})

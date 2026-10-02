@@ -75,8 +75,9 @@ Hasil sidang disimpan di `sessions/<waktu>_<topik>/`:
 | `--no-web` | Matikan web search |
 | `--search-budget <n>` | Maksimal pencarian web per panelis per ronde (bawaan 3; `0` = tanpa batas) |
 | `--no-verify` | Jangan periksa sumber klaim |
+| `--effort <tahap>=<level>` | Effort (porsi "thinking") Claude per tahap: `frame`, `panel`, `judge`, `vote`, `repair`; level `low`…`max`. Menurunkannya menghemat token, tapi bisa mengubah hasil penilaian. Lihat [docs/PLAN.md](docs/PLAN.md) §16 |
 
-**Kuota.** Laporan mencatat token input, token dari cache, token output, dan estimasi biaya untuk tiap peran dan tahap. Codex CLI belum melaporkan token. Penghematan token dilakukan tanpa memotong isi debat; lihat [docs/PLAN.md](docs/PLAN.md) §17.
+**Kuota.** Laporan mencatat token input, token dari cache, token output, dan estimasi biaya untuk tiap peran dan tahap. Codex CLI belum melaporkan token. Penghematan token dilakukan tanpa memotong isi debat; lihat [docs/PLAN.md](docs/PLAN.md) §16.
 
 Dengan P panelis dan R ronde, paling banyak terjadi 1 + R × (P + 1) + P panggilan. Jumlahnya bertambah kalau ada jawaban yang perlu diperbaiki formatnya. Contohnya, 3 panelis dengan 2 ronde berarti paling banyak 12 panggilan.
 

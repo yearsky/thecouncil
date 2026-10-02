@@ -2,7 +2,10 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { EFFORT_LEVELS } from './agents/claude.js'
 import { CONSENSUS_MODES } from './council/consensus.js'
+
+export const EFFORT_STAGES = ['frame', 'panel', 'judge', 'vote', 'repair']
 
 export const CONFIG_FILE = 'council.config.json'
 
@@ -17,6 +20,8 @@ export const DEFAULT_CONFIG = {
   verify: true,
   searchBudget: 3,
   devilsAdvocate: true,
+  // Effort Claude per tahap (kosong = bawaan model). Lihat docs/PLAN.md §16 sebelum menurunkannya.
+  effort: { frame: '', panel: '', judge: '', vote: '', repair: 'low' },
   agents: {
     claude: { type: 'claude-cli', bin: 'claude', model: 'sonnet', timeoutMs: 300000, extraArgs: [] },
     codex: { type: 'codex-cli', bin: 'codex', model: '', timeoutMs: 300000, webSearchArgs: ['-c', 'web_search=live'], extraArgs: [] },
@@ -36,7 +41,7 @@ export function mergeConfig(base, user = {}) {
   for (const id of new Set([...Object.keys(base.agents), ...Object.keys(user.agents || {})])) {
     agents[id] = { ...base.agents[id], ...user.agents?.[id] }
   }
-  return { ...base, ...user, moderator: { ...base.moderator, ...user.moderator }, agents }
+  return { ...base, ...user, moderator: { ...base.moderator, ...user.moderator }, effort: { ...base.effort, ...user.effort }, agents }
 }
 
 export function validateConfig(config) {
@@ -45,6 +50,10 @@ export function validateConfig(config) {
   if (!Array.isArray(config.panel) || config.panel.length === 0) errors.push('"panel" harus berisi minimal satu agen')
   for (const id of config.panel || []) if (!known(id)) errors.push(`agen panel "${id}" tidak ada di "agents"`)
   if (!known(config.moderator?.agent)) errors.push(`moderator "${config.moderator?.agent}" tidak ada di "agents"`)
+  for (const [stage, level] of Object.entries(config.effort || {})) {
+    if (!EFFORT_STAGES.includes(stage)) errors.push(`effort: tahap "${stage}" tidak dikenal (${EFFORT_STAGES.join(', ')})`)
+    else if (level && !EFFORT_LEVELS.includes(level)) errors.push(`effort.${stage}: "${level}" harus salah satu dari ${EFFORT_LEVELS.join(', ')} atau kosong`)
+  }
   return errors
 }
 
@@ -73,7 +82,7 @@ const CONSENSUS_ALIASES = { bulat: 'unanimous', mayoritas: 'majority' }
 
 // Opsi baris perintah `council run` di atas config. Mengembalikan config baru + daftar error.
 export function applyRunOptions(base, values) {
-  const config = { ...base, moderator: { ...base.moderator }, agents: { ...base.agents } }
+  const config = { ...base, moderator: { ...base.moderator }, effort: { ...base.effort }, agents: { ...base.agents } }
   const errors = []
   if (values.panel) config.panel = values.panel.split(',').map((s) => s.trim()).filter(Boolean)
   if (values.moderator) config.moderator.agent = values.moderator
@@ -96,6 +105,11 @@ export function applyRunOptions(base, values) {
   }
   if (values['no-web']) config.web = false
   if (values['no-verify']) config.verify = false
+  for (const pair of values.effort || []) {
+    const [stage, level = ''] = pair.split('=').map((s) => s.trim())
+    if (!pair.includes('=') || !EFFORT_STAGES.includes(stage)) errors.push(`--effort "${pair}": formatnya <tahap>=<level>, tahap salah satu dari ${EFFORT_STAGES.join(', ')}`)
+    else config.effort[stage] = level
+  }
   if (values['search-budget'] !== undefined) {
     const n = Number(values['search-budget'])
     if (!Number.isInteger(n) || n < 0 || n > 20) errors.push('--search-budget harus bilangan bulat 0–20 (0 = tanpa batas)')

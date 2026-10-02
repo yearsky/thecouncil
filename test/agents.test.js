@@ -18,6 +18,11 @@ test('claudeArgs: tanpa --bare, --tools paling akhir, web search hanya jika dimi
   assert.deepEqual(plain.slice(-2), ['--tools', ''])
   assert.ok(!plain.includes('--allowedTools'))
 
+  assert.ok(!plain.includes('--effort'))
+  const low = claudeArgs({ effort: 'low' })
+  assert.equal(low[low.indexOf('--effort') + 1], 'low')
+  assert.ok(low.indexOf('--effort') < low.indexOf('--tools'))
+
   const web = claudeArgs({ webSearch: true, extraArgs: ['--restricted'] })
   assert.deepEqual(web.slice(-4), ['--allowedTools', 'WebSearch,WebFetch', '--tools', 'WebSearch,WebFetch'])
   assert.ok(web.indexOf('--restricted') < web.indexOf('--allowedTools'))

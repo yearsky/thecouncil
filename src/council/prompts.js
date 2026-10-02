@@ -1,6 +1,6 @@
 // Prompt untuk moderator dan panelis. Semua dalam Bahasa Indonesia (K3 di docs/PLAN.md).
 //
-// Hemat token tanpa memotong isi (docs/PLAN.md §17):
+// Hemat token tanpa memotong isi (docs/PLAN.md §16):
 // - Bagian statis (pertanyaan sidang, aturan, format jawaban) selalu di depan dan identik antar-ronde,
 //   supaya bisa memanfaatkan prompt caching penyedia. Bagian yang berubah (ronde, draft, jawaban) di belakang.
 // - Klaim ditulis sekali di daftar klaim bersama (K1, K2, …); jawaban panelis hanya merujuk ID-nya.

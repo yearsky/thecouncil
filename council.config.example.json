@@ -8,6 +8,7 @@
   "verify": true,
   "searchBudget": 3,
   "devilsAdvocate": true,
+  "effort": { "frame": "", "panel": "", "judge": "", "vote": "", "repair": "low" },
   "agents": {
     "claude": {
       "type": "claude-cli",

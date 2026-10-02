@@ -163,3 +163,14 @@ test('pemakaian token dicatat per peran dan per tahap', async () => {
   const finished = events.find((e) => e.type === 'agent_finished')
   assert.deepEqual(finished.usage.tokens, { input: 100, cacheRead: 20, cacheWrite: 0, output: 10 })
 })
+
+test('effort per tahap diteruskan ke agen; perbaikan JSON memakai effort perbaikan', async () => {
+  const a = scriptedAgent('a', { PANEL: ({ n }) => (n === 2 ? 'bukan json' : { position: 'p', vote: { on_draft: 'AGREE' } }), REPAIR: { position: 'p diperbaiki', vote: { on_draft: 'AGREE' } } })
+  const b = scriptedAgent('b')
+  await council({ panel: [a, b], moderator: b, effort: { judge: 'high', panel: '', vote: 'low', repair: 'low' } })
+  const effortOf = (agent, re) => agent.calls.filter((c) => re.test(c.prompt)).map((c) => c.effort)
+  assert.deepEqual(effortOf(b, /^Tahap: FRAME/m), [undefined])
+  assert.ok(effortOf(b, /^Tahap: JUDGE/m).every((e) => e === 'high'))
+  assert.ok(effortOf(b, /^Tahap: PANEL/m).every((e) => e === undefined))
+  assert.deepEqual(a.calls.filter((c) => c.prompt.startsWith('Jawabanmu sebelumnya')).map((c) => c.effort), ['low'])
+})

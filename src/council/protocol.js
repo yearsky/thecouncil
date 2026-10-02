@@ -9,12 +9,13 @@ import { MODERATOR_SYSTEM, PANELIST_SYSTEM, framePrompt, judgePrompt, panelPromp
 import { extractJson, validateFrame, validateJudge, validatePanelist, validateVoteOnly } from './schema.js'
 
 // Minta jawaban JSON; kalau tidak valid, minta perbaikan satu kali (tanpa web search, hanya merapikan format).
-export async function askJson(agent, { system, prompt, model, webSearch = false }, validate) {
+// effort/repairEffort hanya dipakai agen yang mendukungnya (Claude Code CLI); agen lain mengabaikannya.
+export async function askJson(agent, { system, prompt, model, webSearch = false, effort, repairEffort }, validate) {
   const calls = []
   async function call(text, web, repair) {
     const start = Date.now()
     try {
-      const res = await agent.ask({ system, prompt: text, model, webSearch: web })
+      const res = await agent.ask({ system, prompt: text, model, webSearch: web, effort: (repair ? repairEffort : effort) || undefined })
       calls.push({ agent: agent.id, repair, ms: Date.now() - start, costUsd: res.costUsd, tokens: res.tokens || null, model: res.meta?.model })
       return res
     } catch (err) {
@@ -69,6 +70,7 @@ export async function runCouncil({
   web = true,
   searchBudget = 3,
   devilsAdvocate = true,
+  effort = {},
   verify = null,
   random = Math.random,
   emit = () => {},
@@ -97,7 +99,7 @@ export async function runCouncil({
 
   const askModerator = async (prompt, validate, stage) => {
     try {
-      const r = await askJson(moderator.agent, { system: MODERATOR_SYSTEM, prompt, model: moderator.model || undefined }, validate)
+      const r = await askJson(moderator.agent, { system: MODERATOR_SYSTEM, prompt, model: moderator.model || undefined, effort: effort[stage], repairEffort: effort.repair }, validate)
       track(r.calls, { role: 'moderator', stage })
       return r.value
     } catch (err) {
@@ -176,8 +178,9 @@ export async function runCouncil({
               })
         const validate = mode === 'vote' ? validateVoteOnly : (obj) => validatePanelist(obj, { expectVote: mode === 'critique' })
         try {
-          const r = await askJson(agent, { system: PANELIST_SYSTEM, prompt, webSearch: useWeb }, validate)
-          const spent = track(r.calls, { role: agent.id, stage: mode === 'vote' ? 'vote' : 'panel' })
+          const stage = mode === 'vote' ? 'vote' : 'panel'
+          const r = await askJson(agent, { system: PANELIST_SYSTEM, prompt, webSearch: useWeb, effort: effort[stage], repairEffort: effort.repair }, validate)
+          const spent = track(r.calls, { role: agent.id, stage })
           const response = mode === 'vote' ? r.value : register(agent.id, round, r.value)
           const ms = Date.now() - start
           send({ type: 'agent_finished', round, agent: agent.id, ms, repaired: r.repaired, usage: { calls: spent.calls, tokens: spent.tokens, costUsd: spent.costUsd }, response })

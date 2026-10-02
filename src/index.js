@@ -27,6 +27,7 @@ Opsi run:
   --no-web                       Matikan web search
   --search-budget <n>            Maks. pencarian web per panelis per ronde (bawaan 3, 0 = tanpa batas)
   --no-verify                    Jangan periksa sumber klaim
+  --effort <tahap=level>         Effort Claude per tahap (frame|panel|judge|vote|repair = low..max), boleh berulang
   --json                         Cetak event JSON per baris (untuk bot WhatsApp)
 
 Opsi doctor:
@@ -46,6 +47,7 @@ const OPTIONS = {
   'no-web': { type: 'boolean' },
   'no-verify': { type: 'boolean' },
   'search-budget': { type: 'string' },
+  effort: { type: 'string', multiple: true },
   json: { type: 'boolean' },
   rounds: { type: 'string' },
   consensus: { type: 'string' },
@@ -107,6 +109,7 @@ async function run(values, topicParts) {
       web: config.web,
       searchBudget: config.searchBudget,
       devilsAdvocate: config.devilsAdvocate,
+      effort: config.effort,
       verify: config.verify ? createVerifier() : null,
       emit,
       finalize: async (res) => {
