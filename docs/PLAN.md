@@ -1,11 +1,20 @@
 # The Council — Rencana Implementasi
 
-> Status: rencana, belum ada kode. Ditulis 2 Oktober 2026.
+> Status: **Fase 0**. Kode `council doctor` sudah ada dan menunggu diuji di Windows. Rencana ditulis 2 Oktober 2026.
 > Yang ditandai **[cek]** belum aku verifikasi langsung. Cek dulu di Fase 0 sebelum diandalkan.
+
+## Keputusan
+
+| # | Tanggal | Keputusan |
+|---|---|---|
+| K1 | 2 Okt 2026 | Claude jadi **moderator sekaligus panelis**. Model dipilih terpisah untuk tiap peran: `moderator.model` dan `agents.claude.model`. |
+| K2 | 2 Okt 2026 | Panel awal: **Claude, Codex, DeepSeek**. Gemini tidak dipakai (lihat F6), tapi bisa ditambahkan nanti sebagai adapter. |
+| K3 | 2 Okt 2026 | Debat dan laporan dalam **Bahasa Indonesia**. |
+| K4 | 2 Okt 2026 | Fase 0 dibuat **tanpa dependensi npm**: `fetch` bawaan Node untuk DeepSeek, `process.loadEnvFile` untuk `.env`, dan warna ANSI sederhana. |
 
 ## 1. Tujuan
 
-Satu perintah di terminal Windows memulai "sidang" beberapa agen AI (Claude, Codex/ChatGPT, DeepSeek, Gemini opsional). Di sidang itu para agen:
+Satu perintah di terminal Windows memulai "sidang" beberapa agen AI (Claude, Codex/ChatGPT, DeepSeek). Di sidang itu para agen:
 
 1. menjawab masalah yang diberikan secara independen,
 2. saling mengkritik berdasarkan data dan fakta dari internet, lengkap dengan sumbernya,
@@ -24,22 +33,22 @@ Kegunaan berikutnya (fase akhir): kolaborasi coding antar agen.
 
 | # | Temuan | Keyakinan | Dampak ke desain |
 |---|---|---|---|
-| F1 | Claude Code bisa jalan headless lewat `claude -p` dengan `--output-format json` atau `stream-json`. Flag lain yang tersedia: `--json-schema` (hasilnya di field `structured_output`), `--tools`, `--allowedTools`, `--system-prompt`, dan `--no-session-persistence`. | Tinggi (docs resmi + `claude --help` v2.1.287) | Claude dipanggil sebagai subprocess, baik sebagai moderator maupun panelis. |
+| F1 | Claude Code bisa jalan headless lewat `claude -p` dengan `--output-format json` atau `stream-json`. Flag lain yang tersedia: `--json-schema` (hasilnya di field `structured_output`), `--tools`, `--allowedTools`, `--system-prompt`, dan `--no-session-persistence`. | Tinggi (docs resmi + `claude --help` v2.1.287). Kombinasi flag di §7 sudah dicoba dengan Claude Code v2.1.287 di lingkungan cloud (Linux, bukan Windows): uji dasar dan WebSearch berhasil. | Claude dipanggil sebagai subprocess, baik sebagai moderator maupun panelis. |
 | F2 | `--bare` **tidak** membaca login langganan; mode ini butuh `ANTHROPIC_API_KEY`. Menurut docs, `--bare` "will become the default for `-p` in a future release". `chatbot-wa` sudah mengalami ini (keputusan D7 di `docs/SDD.md`). | Tinggi | Jangan pakai `--bare`. Pantau rilis Claude Code: kalau default-nya berubah, adapter harus disesuaikan. |
 | F3 | Docs Anthropic menyebut OAuth langganan "designed to support ordinary use of Claude Code". Batas pemakaian Pro/Max "assume ordinary, individual usage of Claude Code and the Agent SDK". Developer juga tidak boleh "route requests through Free, Pro, or Max plan credentials on behalf of their users". | Tinggi untuk isi docs-nya. Aku tidak bisa memberi pendapat hukum soal penafsirannya. | Pakai Council **untuk dirimu sendiri**, di PC-mu, dengan binary `claude` resmi. Jangan jadikan layanan untuk orang lain lewat langgananmu. Bot WA kamu sudah owner-only, jadi sejalan. Tetap baca sendiri ketentuannya. |
 | F4 | Mei 2026, Anthropic mengumumkan bahwa mulai 15 Juni 2026 pemakaian `claude -p`/Agent SDK dipindah ke kredit terpisah. Rencana itu **ditunda**. Media mengutip halaman support Anthropic: "For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." | Sedang. Ini dari sumber sekunder; halaman support aslinya tidak aku buka. | Kebijakan ini bisa berubah lagi. Catat pemakaian tiap panggilan (`total_cost_usd` di output JSON, yang merupakan estimasi sisi klien), dan sediakan opsi API key untuk tiap agen. |
 | F5 | Codex CLI bisa jalan non-interaktif lewat `codex exec`: prompt via stdin (`-`), output JSONL dengan `--json`, plus `--output-last-message`, `--sandbox read-only`, dan `--ephemeral`. `chatbot-wa` sudah memakai ini dengan login akun ChatGPT di Windows. Web search: `--search` atau `-c web_search="live"` **[cek]**. | Tinggi untuk `exec` (sudah jalan di kodemu). Sedang untuk web search: hanya dari ringkasan hasil pencarian, karena docs OpenAI tidak bisa dibuka dari lingkunganku. | Codex jadi panelis. Web search dicek di Fase 0. |
-| F6 | **Gemini CLI berhenti melayani akun individu** (gratis, Google AI Pro, Ultra) sejak 18 Juni 2026; penggunanya diarahkan ke Antigravity CLI. Login dengan API key tetap jalan. Sumbernya diskusi resmi di repo `google-gemini/gemini-cli`. README Gemini CLI masih menyebut free tier login Google, kemungkinan belum diperbarui. | Tinggi untuk penghentiannya. Aku **tidak tahu** apakah Antigravity CLI punya mode headless. | Gemini jadi **opsional**, lewat Gemini API key. Antigravity diteliti nanti. |
-| F7 | DeepSeek API memakai format OpenAI (base URL `https://api.deepseek.com`) dan dibayar per token. Nama model saat ini **[cek]**: sumber sekunder menyebut `deepseek-v4-flash` dan `deepseek-v4-pro`, tapi docs resmi tidak bisa aku buka. Aku juga tidak menemukan bukti ada web search bawaan di API-nya **[cek]**. | Sedang | Pakai SDK `openai` (sudah dipakai di `chatbot-wa`) dengan `baseURL`. Nama model diambil dari config dan dicek lewat `GET /models` di `council doctor`. Untuk data internet, DeepSeek perlu dibantu (lihat §6). |
+| F6 | **Gemini CLI berhenti melayani akun individu** (gratis, Google AI Pro, Ultra) sejak 18 Juni 2026; penggunanya diarahkan ke Antigravity CLI. Login dengan API key tetap jalan. Sumbernya diskusi resmi di repo `google-gemini/gemini-cli`. README Gemini CLI masih menyebut free tier login Google, kemungkinan belum diperbarui. | Tinggi untuk penghentiannya. Aku **tidak tahu** apakah Antigravity CLI punya mode headless. | Gemini tidak dipakai dulu (K2). Kalau nanti ditambahkan, pakai Gemini API key. |
+| F7 | DeepSeek API memakai format OpenAI (base URL `https://api.deepseek.com`) dan dibayar per token. Nama model saat ini **[cek]**: sumber sekunder menyebut `deepseek-v4-flash` dan `deepseek-v4-pro`, tapi docs resmi tidak bisa aku buka. Aku juga tidak menemukan bukti ada web search bawaan di API-nya **[cek]**. | Sedang | Dipanggil dengan `fetch` bawaan Node (K4). Nama model diambil dari config dan dicek lewat `GET /models` di `council doctor`. Untuk data internet, DeepSeek perlu dibantu (lihat §6). |
 | F8 | Pola serupa sudah ada: **llm-council** (Andrej Karpathy). Alurnya: jawaban awal paralel, lalu peer review **anonim** (supaya model tidak pilih kasih), lalu "Chairman" menyusun jawaban akhir. Bedanya, itu web app lewat OpenRouter (API), bukan CLI berlangganan, dan tidak mewajibkan konsensus. | Sedang (dari artikel, bukan dari repo-nya langsung) | Pinjam ide anonimisasi dan moderator/chairman. |
 | F9 | `chatbot-wa/src/ai/cli.js` sudah menangani jebakan Windows: CLI `.cmd` butuh `shell`, argumen di-quote manual, prompt dikirim lewat stdin, dan `taskkill /T /F` untuk mematikan seluruh pohon proses. Ada juga pola test `fakeBin()` yang membungkus fixture jadi `.cmd`. | Tinggi (kodenya aku baca langsung) | **Salin dan pakai ulang**, jangan tulis ulang. |
+| F10 | Claude Code v2.1.287 punya flag `--restricted`, yang antara lain mengabaikan file settings user/project/local. Di uji coba cloud, login tetap jalan, tapi plugin **tetap termuat** dengan flag itu. Di Windows mungkin hasilnya berbeda. | Sedang (satu uji coba, bukan di Windows) | Tidak dipakai secara bawaan. Doctor menampilkan plugin/MCP yang ikut termuat sebagai info. `--restricted` bisa dicoba lewat `extraArgs`. |
 
 ## 3. Asumsi (koreksi kalau salah)
 
 - "DeepSeek APK" = **API key** DeepSeek, bukan aplikasi Android.
-- Jalan di PC Windows 11 milikmu dengan Node.js ≥ 20. Menurut SDD `chatbot-wa`, kamu sudah pakai v22. Login `claude` dan `codex` sudah dilakukan.
+- Jalan di PC Windows 11 milikmu dengan Node.js ≥ 22. Menurut SDD `chatbot-wa`, kamu sudah pakai v22. Login `claude` dan `codex` sudah dilakukan.
 - Dipakai pribadi, oleh satu orang.
-- Bahasa debat default Bahasa Indonesia, bisa diganti.
 
 ## 4. Arsitektur
 
@@ -49,14 +58,13 @@ Kegunaan berikutnya (fase akhir): kolaborasi coding antar agen.
                               ▼
                  ┌──────────────────────────┐
                  │  council engine (Node)   │  state machine debat
-                 └───┬──────┬──────┬──────┬─┘
-     event JSONL     │      │      │      │   paralel per ronde
-  ┌─────────────┐ ┌──▼───┐ ┌▼────┐ ┌▼────────┐ ┌▼─────────┐
-  │ terminal /  │ │Claude│ │Codex│ │DeepSeek │ │Gemini    │
-  │ bot WA /    │ │claude│ │codex│ │API      │ │(opsional,│
-  │ Claude Code │ │ -p   │ │exec │ │(SDK     │ │ API key) │
-  └─────────────┘ └──────┘ └─────┘ │ openai) │ └──────────┘
-                                   └─────────┘
+                 └─────┬────────┬────────┬──┘
+     event JSONL       │        │        │   paralel per ronde
+  ┌─────────────┐ ┌────▼───┐ ┌──▼────┐ ┌─▼────────┐
+  │ terminal /  │ │ Claude │ │ Codex │ │ DeepSeek │
+  │ bot WA /    │ │ claude │ │ codex │ │ API      │
+  │ Claude Code │ │ -p     │ │ exec  │ │ (fetch)  │
+  └─────────────┘ └────────┘ └───────┘ └──────────┘
                  ┌──────────────────────────┐
                  │ verifier sumber (kode)   │  fetch URL + cek kutipan
                  └──────────────────────────┘
@@ -70,19 +78,22 @@ Prinsip:
 4. **Adapter seragam.** Menambah agen baru cukup dengan menambah satu file adapter.
 
 ```js
-// Kontrak adapter
+// Kontrak adapter (versi Fase 0, src/agents/)
 {
   id: 'codex',
   label: 'Codex',
-  capabilities: { webSearch: true, structuredOutput: false, streaming: true },
-  async ask({ system, prompt, schema, timeoutMs, signal, onDelta }) {
-    // → { text, json?, usage?, costUsd? }
+  type: 'codex-cli',
+  model: '',
+  capabilities: { webSearch: true },
+  async ask({ system, prompt, webSearch, model, timeoutMs }) {
+    // → { text, usage?, costUsd?, meta?: { model, tools, plugins, mcpServers, toolUses } }
   },
-  async doctor() {
-    // → { ok, version, detail }
-  }
+  version(),              // agen CLI: string versi atau null
+  hasKey(), listModels()  // agen API
 }
 ```
+
+Streaming (`onDelta`) dan pembatalan (`signal`) ditambahkan di Fase 3.
 
 ## 5. Protokol debat
 
@@ -124,7 +135,7 @@ moderator  panelis paralel    kode   moderator │    panelis paralel           
 }
 ```
 
-Output Claude bisa dipaksa mengikuti skema ini lewat `--json-schema`. Untuk agen lain alurnya: minta JSON di prompt, parse, lalu validasi. Kalau gagal, agen diminta memperbaiki satu kali. Kalau masih gagal, agen itu dianggap gagal di ronde tersebut, dan debat tetap jalan.
+Output Claude bisa dipaksa mengikuti skema ini lewat `--json-schema`, tapi skema JSON penuh tanda kutip, dan argumen di Windows melewati cmd.exe. Jadi di Fase 1 cara ini dites dulu di Windows. Kalau bermasalah, Claude diperlakukan sama seperti agen lain. Untuk agen lain alurnya: minta JSON di prompt, parse, lalu validasi. Kalau gagal, agen diminta memperbaiki satu kali. Kalau masih gagal, agen itu dianggap gagal di ronde tersebut, dan debat tetap jalan.
 
 ### Aturan anti "setuju palsu"
 
@@ -138,7 +149,7 @@ Model bahasa cenderung mengalah ke pendapat yang lain, jadi "semua setuju" bisa 
 
 ## 6. Data & fakta
 
-- **Agen yang punya web search sendiri:** Claude (`WebSearch`, `WebFetch`), Codex (**[cek]**), dan Gemini (Google Search grounding, lewat API key).
+- **Agen yang punya web search sendiri:** Claude (`WebSearch`, `WebFetch`) dan Codex (**[cek]**).
 - **DeepSeek tidak punya web search bawaan [cek].** Ada dua opsi, dipilih di Fase 2:
   - a. **Paket bukti** (default). DeepSeek menerima semua sumber terverifikasi dari agen lain dan berperan sebagai *skeptic*, yaitu pemeriksa logika dan konsistensi. Ini yang paling sederhana dan tanpa biaya tambahan.
   - b. **Tool pencarian.** Orchestrator memberi DeepSeek function calling ke API pencarian, misalnya Brave atau Tavily. Ini butuh API key tambahan.
@@ -154,10 +165,9 @@ Model bahasa cenderung mengalah ke pendapat yang lain, jadi "semua setuju" bisa 
 
 | Agen | Cara panggil | Akun | Web search | Status |
 |---|---|---|---|---|
-| Claude (moderator + panelis) | `claude -p --output-format json --json-schema <skema> --system-prompt <prompt> --tools <WebSearch,WebFetch> --allowedTools "WebSearch,WebFetch" --no-session-persistence --model <model>`. Prompt dikirim lewat stdin, cwd = folder sesi yang kosong. Format daftar `--tools` **[cek]**. | Langganan Claude Pro (tanpa `--bare`) | Ya | Flag-nya ada di `--help`, tapi belum dites di Windows. |
+| Claude (moderator + panelis) | `claude -p --output-format stream-json --verbose --no-session-persistence --permission-mode dontAsk --system-prompt <prompt> --model <model> [--allowedTools WebSearch,WebFetch] --tools <WebSearch,WebFetch atau "">`. Prompt dikirim lewat stdin, cwd = folder kosong. `stream-json` dipakai supaya event `init` (model, tool, plugin) dan pemanggilan tool bisa dibaca. | Langganan Claude Pro (tanpa `--bare`) | Ya | Sudah dicoba dengan v2.1.287 di cloud (Linux); belum dites di Windows. |
 | Codex | `codex exec --skip-git-repo-check --sandbox read-only --ephemeral --color never --output-last-message <file> [-c web_search="live"] -` | Akun ChatGPT | **[cek]** | `exec` sudah jalan di `chatbot-wa`. |
-| DeepSeek | SDK `openai` dengan `baseURL: "https://api.deepseek.com"` dan `DEEPSEEK_API_KEY` | API key, bayar per token | Tidak **[cek]** | Nama model **[cek]**. |
-| Gemini (opsional) | `gemini -p "..." --output-format json` dengan `GEMINI_API_KEY`, atau API langsung | API key | Ya (grounding) | Login akun pribadi sudah tidak bisa (F6). |
+| DeepSeek | `fetch` ke `https://api.deepseek.com/chat/completions` (format OpenAI) dengan `DEEPSEEK_API_KEY` | API key, bayar per token | Tidak **[cek]** | Nama model **[cek]**. |
 
 Pelajaran dari `chatbot-wa` yang wajib dibawa:
 
@@ -189,18 +199,18 @@ Fase 1, sederhana seperti chat:
 ```
 thecouncil/
 ├─ package.json                # "type": "module", bin: council
-├─ .env.example                # DEEPSEEK_API_KEY=, GEMINI_API_KEY=
-├─ .gitignore                  # .env, sessions/, node_modules/
+├─ .env.example                # DEEPSEEK_API_KEY=
+├─ .gitignore                  # .env, council.config.json, sessions/
 ├─ council.config.example.json
 ├─ src/
 │  ├─ index.js                 # CLI: council run | doctor | replay
 │  ├─ config.js
+│  ├─ doctor.js                # Fase 0: cek tiap agen
 │  ├─ agents/
 │  │  ├─ cli.js                # disalin dari chatbot-wa/src/ai/cli.js
 │  │  ├─ claude.js             # pola dari chatbot-wa/src/ai/claudeCli.js
 │  │  ├─ codex.js              # pola dari chatbot-wa/src/ai/codexCli.js
 │  │  ├─ openaiCompat.js       # DeepSeek + provider lain yang kompatibel OpenAI
-│  │  ├─ gemini.js             # opsional
 │  │  └─ index.js              # registry agen dari config
 │  ├─ council/
 │  │  ├─ protocol.js           # state machine FRAME → RONDE → JUDGE → LAPORAN
@@ -209,6 +219,7 @@ thecouncil/
 │  │  ├─ consensus.js          # hitung suara, kondisi berhenti
 │  │  └─ anonymize.js
 │  ├─ evidence/verify.js       # fetch URL + cek kutipan
+│  ├─ ui/style.js              # warna ANSI
 │  ├─ ui/terminal.js           # tampilan chat berwarna + baris status
 │  ├─ ui/panes.js              # opsional: wt split-pane
 │  └─ store/session.js         # sessions/<waktu>_<slug>/events.jsonl, report.md, <agen>.log
@@ -220,30 +231,25 @@ thecouncil/
 └─ docs/PLAN.md
 ```
 
-Gaya kode mengikuti `chatbot-wa`: JavaScript ESM tanpa build step, test dengan `node --test`, dependensi seminimal mungkin (`chalk`, `dotenv`, `openai`).
+Gaya kode mengikuti `chatbot-wa`: JavaScript ESM tanpa build step, test dengan `node --test`, dependensi seminimal mungkin. Sampai Fase 0 belum ada dependensi npm sama sekali (K4).
 
-Contoh config:
+Config yang dipakai ada di `council.config.example.json`. Intinya:
 
 ```json
 {
-  "language": "id",
-  "moderator": "claude",
+  "moderator": { "agent": "claude", "model": "sonnet" },
   "panel": ["claude", "codex", "deepseek"],
   "maxRounds": 3,
   "consensus": "unanimous",
   "agents": {
-    "claude": { "type": "claude-cli", "model": "sonnet", "timeoutMs": 300000 },
-    "codex": { "type": "codex-cli", "webSearch": "live", "timeoutMs": 300000 },
-    "deepseek": {
-      "type": "openai-compatible",
-      "baseURL": "https://api.deepseek.com",
-      "model": "ISI_DARI_HASIL_council_doctor",
-      "apiKeyEnv": "DEEPSEEK_API_KEY"
-    },
-    "gemini": { "type": "gemini", "enabled": false, "apiKeyEnv": "GEMINI_API_KEY" }
+    "claude": { "type": "claude-cli", "model": "sonnet" },
+    "codex": { "type": "codex-cli", "model": "", "webSearchArgs": ["-c", "web_search=live"] },
+    "deepseek": { "type": "openai-compatible", "baseURL": "https://api.deepseek.com", "model": "", "apiKeyEnv": "DEEPSEEK_API_KEY" }
   }
 }
 ```
+
+`moderator.model` dan `agents.claude.model` boleh berbeda (K1), misalnya moderator `opus` dan panelis `sonnet`.
 
 ## 10. Kontrak event (untuk terminal, WhatsApp, dan Claude Code)
 
@@ -287,13 +293,18 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ### Fase 0 — Uji coba & `council doctor`
 
-- Di Windows, jalankan tiap CLI secara headless secara manual. Catat versi dan flag yang benar (`claude --help`, `codex exec --help`).
-- Pastikan hal-hal berikut:
+**Status:** kode selesai (`src/doctor.js`, adapter di `src/agents/`, 21 test dengan agen palsu). Claude sudah dicoba dengan CLI asli di lingkungan cloud. **Menunggu dijalankan di Windows.**
+
+- `council doctor` memeriksa tiap agen:
+  - Claude/Codex: terpasang (`--version`).
+  - DeepSeek: API key terisi dan `GET /models`.
+  - Uji dasar ("SIAP"), termasuk model moderator Claude kalau berbeda.
+  - Uji web search (pertanyaan yang butuh data terbaru): URL di jawaban dibuka untuk dicek. Untuk Claude, juga dicek apakah tool `WebSearch` benar-benar dipanggil.
+- Yang harus dipastikan di Windows:
   - Claude `-p` jalan dengan login langganan, termasuk `WebSearch`.
-  - Web search Codex jalan, dan catat cara mengaktifkannya.
-  - DeepSeek `GET /models` mengembalikan nama model.
-  - (Opsional) Gemini jalan dengan API key.
-- **Selesai bila:** `council doctor` menampilkan tabel ✅/❌ per agen, dan setiap agen bisa menjawab satu pertanyaan yang butuh internet, lengkap dengan URL sumber.
+  - Web search Codex jalan; kalau `-c web_search=live` gagal, coba `["--search"]` di `webSearchArgs`.
+  - DeepSeek `GET /models` mengembalikan nama model; pilih satu untuk config.
+- **Selesai bila:** `council doctor` di Windows menunjukkan ketiga agen ✔ (DeepSeek tanpa web search), dan Claude serta Codex bisa menjawab pertanyaan yang butuh internet, lengkap dengan URL sumber.
 
 ### Fase 1 — MVP debat
 
@@ -334,11 +345,12 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ## 15. Pertanyaan terbuka
 
-1. Claude jadi moderator **sekaligus** panelis (lebih boros kuota Claude), atau moderator saja?
-2. Pakai Gemini (butuh Gemini API key), atau mulai dengan Claude + Codex + DeepSeek dulu?
-3. Untuk DeepSeek, cukup "paket bukti" (default), atau kamu mau API pencarian tambahan?
-4. Bahasa: Bahasa Indonesia untuk semuanya, atau debat dalam bahasa Inggris (biasanya hasil pencariannya lebih banyak) lalu laporannya dalam Bahasa Indonesia?
-5. `chatbot-wa` memanggil `thecouncil` sebagai subprocess (rekomendasiku), atau meng-import-nya sebagai library?
+Sudah dijawab: peran Claude (K1), Gemini (K2), dan bahasa (K3).
+
+Masih terbuka:
+
+1. Untuk DeepSeek, cukup "paket bukti" (default), atau kamu mau API pencarian tambahan? Diputuskan sebelum Fase 2.
+2. `chatbot-wa` memanggil `thecouncil` sebagai subprocess (rekomendasiku), atau meng-import-nya sebagai library? Diputuskan sebelum Fase 4.
 
 ## 16. Sumber
 

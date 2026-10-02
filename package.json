@@ -1,0 +1,16 @@
+{
+  "name": "thecouncil",
+  "version": "0.1.0",
+  "description": "Sidang debat beberapa agen AI (Claude Code CLI, Codex CLI, DeepSeek API) dari terminal Windows",
+  "type": "module",
+  "bin": {
+    "council": "src/index.js"
+  },
+  "scripts": {
+    "doctor": "node src/index.js doctor",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

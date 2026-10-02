@@ -1,0 +1,32 @@
+{
+  "language": "id",
+  "moderator": { "agent": "claude", "model": "sonnet" },
+  "panel": ["claude", "codex", "deepseek"],
+  "maxRounds": 3,
+  "consensus": "unanimous",
+  "agents": {
+    "claude": {
+      "type": "claude-cli",
+      "bin": "claude",
+      "model": "sonnet",
+      "timeoutMs": 300000,
+      "extraArgs": []
+    },
+    "codex": {
+      "type": "codex-cli",
+      "bin": "codex",
+      "model": "",
+      "timeoutMs": 300000,
+      "webSearchArgs": ["-c", "web_search=live"],
+      "extraArgs": []
+    },
+    "deepseek": {
+      "type": "openai-compatible",
+      "label": "DeepSeek",
+      "baseURL": "https://api.deepseek.com",
+      "model": "",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "timeoutMs": 180000
+    }
+  }
+}
