@@ -4,6 +4,11 @@
   "panel": ["claude", "codex", "deepseek"],
   "maxRounds": 3,
   "consensus": "unanimous",
+  "web": true,
+  "verify": true,
+  "searchBudget": 3,
+  "devilsAdvocate": true,
+  "effort": { "frame": "", "panel": "", "judge": "", "vote": "", "repair": "low" },
   "agents": {
     "claude": {
       "type": "claude-cli",

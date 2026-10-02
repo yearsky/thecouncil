@@ -1,6 +1,6 @@
 # The Council — Rencana Implementasi
 
-> Status: **Fase 0**. Kode `council doctor` sudah ada dan menunggu diuji di Windows. Rencana ditulis 2 Oktober 2026.
+> Status: **Fase 2**. `council run` (debat dengan verifikasi sumber) dan `council doctor` sudah ada. Keduanya sudah dicoba dengan Claude asli di lingkungan cloud, tapi belum di Windows. Rencana ditulis 2 Oktober 2026.
 > Yang ditandai **[cek]** belum aku verifikasi langsung. Cek dulu di Fase 0 sebelum diandalkan.
 
 ## Keputusan
@@ -11,6 +11,8 @@
 | K2 | 2 Okt 2026 | Panel awal: **Claude, Codex, DeepSeek**. Gemini tidak dipakai (lihat F6), tapi bisa ditambahkan nanti sebagai adapter. |
 | K3 | 2 Okt 2026 | Debat dan laporan dalam **Bahasa Indonesia**. |
 | K4 | 2 Okt 2026 | Fase 0 dibuat **tanpa dependensi npm**: `fetch` bawaan Node untuk DeepSeek, `process.loadEnvFile` untuk `.env`, dan warna ANSI sederhana. |
+| K5 | 2 Okt 2026 | Panel boleh berisi **beberapa agen Claude dengan model berbeda** (Opus, Sonnet, Haiku), cukup dengan satu langganan Claude. Contohnya ada di `examples/claude-only.json`. |
+| K6 | 2 Okt 2026 | Hemat token **tanpa memotong atau meringkas isi debat**, karena memotong bisa menimbulkan bias. Penghematan hanya lewat: tidak mengulang isi, mengukur pemakaian, dan pengaturan yang tidak mengubah isi (§16). |
 
 ## 1. Tujuan
 
@@ -256,16 +258,24 @@ Config yang dipakai ada di `council.config.example.json`. Intinya:
 `council run --json "<topik>"` mencetak satu event JSON per baris ke stdout:
 
 ```
-{"type":"session_started","id":"...","topic":"...","panel":["claude","codex","deepseek"]}
-{"type":"framed","question":"...","criteria":["..."]}
-{"type":"round_started","round":1,"mode":"blind"}
-{"type":"agent_started","round":1,"agent":"codex"}
-{"type":"agent_finished","round":1,"agent":"codex","position":"...","claims":3,"ms":33000}
-{"type":"agent_failed","round":1,"agent":"deepseek","error":"timeout"}
-{"type":"verified","round":1,"ok":3,"warn":1,"fail":1}
-{"type":"judged","round":1,"draft":"...","agreements":["..."],"disagreements":["..."]}
-{"type":"finished","status":"unanimous|majority|no_consensus|error","summary":"...","report":"sessions/.../report.md"}
+{"type":"session_started","ts":"...","topic":"...","panel":[{"id":"claude","label":"Claude","model":"sonnet"}],"moderator":{"id":"claude","label":"Claude","model":"opus"},"maxRounds":3,"consensus":"unanimous","web":true}
+{"type":"framed","ts":"...","question":"...","criteria":["..."],"context":"..."}
+{"type":"round_started","ts":"...","round":1,"mode":"blind|critique|vote"}
+{"type":"agent_started","ts":"...","round":1,"agent":"codex"}
+{"type":"agent_finished","ts":"...","round":1,"agent":"codex","ms":33000,"repaired":false,"response":{"position":"...","proposals":[],"claims":[],"critiques":[],"changed_mind":{},"vote":{}}}
+{"type":"agent_failed","ts":"...","round":1,"agent":"deepseek","ms":180000,"error":"..."}
+{"type":"judged","ts":"...","round":1,"summary":"...","agreements":["..."],"disagreements":["..."],"draft":"...","next_focus":"..."}
+{"type":"votes","ts":"...","round":2,"draftRound":1,"status":"majority","accepted":["claude","codex"],"rejected":["deepseek"],"total":3,"votes":{},"final":true}
+{"type":"warning","ts":"...","stage":"frame|panel|judge","message":"..."}
+{"type":"finished","ts":"...","status":"unanimous|majority|no_consensus|error","round":2,"decidedBy":"critique|vote|null","summary":"...","draft":"...","usage":{"calls":8},"session":"...","report":"/.../report.md"}
 ```
+
+Catatan:
+
+- `response` di `agent_finished` berisi jawaban panelis yang sudah divalidasi (format di §5). Di pemungutan suara akhir isinya hanya `{"vote": ...}`.
+- `final: true` hanya muncul pada `votes` dari pemungutan suara akhir.
+- Event `verified` (hasil verifier sumber) ditambahkan di Fase 2.
+- Semua event juga disimpan di `sessions/<id>/events.jsonl`.
 
 Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: menambah field boleh, mengganti nama field jangan.
 
@@ -293,7 +303,13 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ### Fase 0 — Uji coba & `council doctor`
 
-**Status:** kode selesai (`src/doctor.js`, adapter di `src/agents/`, 21 test dengan agen palsu). Claude sudah dicoba dengan CLI asli di lingkungan cloud. **Menunggu dijalankan di Windows.**
+**Status:** kode selesai (`src/doctor.js`, adapter di `src/agents/`). Doctor sudah dijalankan dengan Claude asli di lingkungan cloud (login OAuth langganan):
+
+- Alias `opus`, `sonnet`, dan `haiku` masing-masing jalan sebagai claude-opus-5-5, claude-sonnet-5-5, dan claude-haiku-4-5-20251001.
+- Opus dan Sonnet lolos uji web search.
+- Haiku menjawab "Node.js 26 sudah LTS", berbeda dari dua model lainnya, dan URL sumbernya ditolak server (HTTP 403).
+
+**Menunggu dijalankan di Windows.**
 
 - `council doctor` memeriksa tiap agen:
   - Claude/Codex: terpasang (`--version`).
@@ -308,14 +324,49 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 
 ### Fase 1 — MVP debat
 
-- Adapter Claude, Codex, dan DeepSeek. Protokol FRAME → ronde blind → JUDGE → ronde kritik → vote. Skema + validasi, tampilan terminal sederhana, penyimpanan sesi + `report.md`.
-- Test dengan agen palsu (`fakeBin`), termasuk lewat `.cmd` di Windows. Skenario yang dites: agen timeout, JSON rusak, semua setuju di ronde 1, dan tidak pernah setuju.
-- **Selesai bila:** `council run "ide hackathon ..."` selesai dengan sendirinya dengan status `unanimous`, `majority`, atau `no_consensus`, dan laporannya bisa dibaca.
+**Status:** selesai dan sudah dicoba sungguhan dengan Claude di lingkungan cloud. Belum diuji di Windows, dan belum diuji dengan Codex maupun DeepSeek asli.
+
+- Kode:
+  - `src/council/`: protokol, prompt, skema dan perbaikan JSON, penghitungan suara, laporan.
+  - `src/ui/terminal.js`, `src/store/session.js`.
+  - `council run` beserta opsinya.
+- Test dengan agen palsu, baik di dalam proses maupun lewat CLI. Skenario: bulat di ronde 2, tidak pernah sepakat, mode mayoritas, JSON rusak lalu diperbaiki atau tetap rusak, panelis gagal lalu pulih, semua panelis gagal, moderator gagal merumuskan, dan pengaturan web search.
+- **Uji sungguhan** (2 Okt 2026): `examples/claude-only.json` (Opus, Sonnet, Haiku; moderator Opus), `--rounds 2`, topik ide hackathon.
+  - Selesai dalam sekitar 6 menit dengan 12 panggilan. `total_cost_usd` menurut Claude Code $2,24 (estimasi sisi klien).
+  - Ronde 2: ketiganya memilih "setuju dengan catatan", tapi Haiku tetap mencantumkan keberatan pemblokir (angka IASC berbeda antar-panelis). Kode menghitungnya sebagai tidak setuju, jadi hasilnya 2/3.
+  - Suara akhir: 3/3, **bulat**. Ide terpilih adalah "CekDulu", pemeriksa pesan, tautan, dan rekening sebelum transfer.
+  - Temuan 1: WebFetch para panelis ditolak proxy di lingkungan cloud, jadi tidak ada kutipan langsung. Semua angka di laporan diberi label estimasi oleh panelis sendiri. Ini memperkuat kebutuhan verifier di Fase 2.
+  - Temuan 2 (bug, sudah diperbaiki): draft moderator dipotong di 8.000 karakter sebelum dinilai panelis, dan ketiganya melaporkan bagian "Risiko" terpotong. Batasnya kini 40.000 karakter, dan moderator diminta menulis draft maksimal sekitar 1.000 kata.
+  - Temuan 3 (sudah diperbaiki): judul `##` di draft moderator merusak struktur laporan. Judul di dalam draft kini diturunkan levelnya.
+- **Selesai bila:** `council run "ide hackathon ..."` selesai dengan sendirinya dengan status `unanimous`, `majority`, atau `no_consensus`, dan laporannya bisa dibaca. Kriteria ini terpenuhi di cloud.
 
 ### Fase 2 — Data & fakta
 
-- Klaim + verifier sumber, anonimisasi, devil's advocate, aturan "ganti posisi harus ada buktinya", dan paket bukti untuk DeepSeek.
-- **Selesai bila:** laporan memuat tabel klaim dengan status ✅/⚠️/❌, dan kesimpulannya tidak bergantung pada klaim ❌.
+**Status:** selesai dan dicoba sungguhan dengan Claude di lingkungan cloud. Belum diuji di Windows, dan belum diuji dengan Codex maupun DeepSeek asli.
+
+- **Verifier sumber** (`src/evidence/verify.js`). Program membuka URL setiap klaim, mengubah HTML menjadi teks, lalu mencari kutipannya setelah teks disamakan (huruf kecil, tanpa aksen, "Rp9" = "Rp 9"). Statusnya:
+  - ✅ kutipan ditemukan persis
+  - ⚠️ kutipan hanya mirip (≥60% trigram), tidak cocok, atau tidak ada
+  - ❔ tidak bisa dicek otomatis (HTTP 401/403/429/5xx, PDF, timeout)
+  - ❌ sumber tidak ada (404/410, domain tidak ditemukan, URL tidak valid)
+  - ➖ klaim fakta tanpa sumber
+
+  Halaman yang sama hanya diunduh sekali per sidang.
+- **Daftar klaim bersama** (`src/council/claims.js`). ID-nya K1, K2, … berlaku untuk seluruh sidang, dan klaim yang sama digabung. Agen tanpa web search (DeepSeek) mendapat kutipan dari klaim ✅ sebagai "paket bukti". Moderator hanya boleh menyimpulkan dari klaim ✅.
+- **Anonimisasi** (`src/council/anonymize.js`). Panelis dan moderator hanya melihat "Panelis A/B/C" dengan urutan acak. Sudah dites bahwa prompt tidak pernah memuat nama model.
+- **Devil's advocate** bergiliran di tiap ronde kritik, menurut urutan alias.
+- **Catatan integritas** (dicatat program):
+  - setuju tapi menulis keberatan pemblokir (dihitung tidak setuju),
+  - suara berubah tanpa `changed_mind.because` atau `change_reason`,
+  - berubah pendapat tanpa alasan,
+  - merujuk ID klaim yang tidak ada.
+- **Pengaturan baru:** token dicatat per panggilan; `--search-budget`; `--no-verify`; `--effort tahap=level` (lihat §16).
+- **Uji sungguhan** (2 Okt 2026, topik dan konfigurasi sama dengan uji Fase 1):
+  - Hasilnya bulat di suara akhir, 12 panggilan, `total_cost_usd` $1,54.
+  - Haiku kembali menulis "setuju" disertai keberatan pemblokir, padahal prompt sudah melarangnya. Program menangkap dan menghitungnya tidak setuju.
+  - Opus berubah dari tidak setuju ke setuju dengan catatan, disertai alasan, jadi tidak ditandai.
+  - Ke-13 klaim berstatus ❔, karena proxy egress lingkungan cloud menolak situs-situs sumbernya (HTTP 403 pada CONNECT). Situs yang diizinkan, seperti nodejs.org, terbaca normal. Di PC sendiri, hal ini seharusnya tidak terjadi, kecuali situsnya memang memblokir bot.
+- **Selesai bila:** laporan memuat tabel klaim dengan status ✅/⚠️/❌, dan kesimpulannya tidak bergantung pada klaim ❌. Kriteria ini terpenuhi di cloud. Namun status ✅ dan ❌ dari situs sungguhan baru terlihat di uji lokal; di cloud yang muncul hanya ❔ karena proxy.
 
 ### Fase 3 — Pengalaman terminal
 
@@ -338,7 +389,8 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
 | Kuota langganan cepat habis. Satu sidang berarti banyak panggilan, dan Claude dipakai sebagai moderator sekaligus panelis. | Batasi `maxRounds`, pakai model yang lebih ringan untuk panelis, ringkas konteks antar ronde, tampilkan pemakaian tiap sidang, dan sediakan opsi moderator yang tidak ikut jadi panelis. Angka kuota pastinya tidak aku ketahui. |
 | Kebijakan atau harga berubah. F2, F4, dan F6 menunjukkan perubahan bisa terjadi cepat. | Adapter terisolasi. Tiap agen bisa dipindah ke API key lewat config. Jalankan `council doctor` secara rutin. |
 | Konsensus palsu. | Aturan di §5. |
-| Sumber hasil halusinasi. | Verifier di §6; klaim ❌ tidak dipakai. |
+| Sumber hasil halusinasi. | Verifier di §6; klaim ❌ tidak dipakai. Uji sungguhan menunjukkan model bisa berbeda soal fakta yang sama (Haiku vs Opus/Sonnet soal LTS Node.js). |
+| Panelis berbias ke label model (mis. mengalah ke "Opus"). | Fase 1 masih menampilkan nama panelis. Anonimisasi (Panelis A/B/C) dikerjakan di Fase 2. |
 | Masalah khas Windows (quoting, `.cmd`, proses yatim). | Pakai ulang `cli.js` dari `chatbot-wa` dan test lewat `.cmd`. |
 | Prompt injection dari konten web. | Agen tidak punya tool tulis atau shell; verifikasi dilakukan kode. |
 | Lama: satu sidang bisa makan beberapa menit. | Event progres; di WhatsApp, prosesnya asinkron. |
@@ -352,7 +404,78 @@ Masih terbuka:
 1. Untuk DeepSeek, cukup "paket bukti" (default), atau kamu mau API pencarian tambahan? Diputuskan sebelum Fase 2.
 2. `chatbot-wa` memanggil `thecouncil` sebagai subprocess (rekomendasiku), atau meng-import-nya sebagai library? Diputuskan sebelum Fase 4.
 
-## 16. Sumber
+## 16. Hemat token tanpa memotong isi (K6)
+
+Isi debat tidak dipotong atau diringkas sebelum dibaca panelis lain. Penghematan diambil dari tiga hal: tidak mengulang isi, mengukur pemakaian, dan pengaturan yang tidak mengubah isi.
+
+### Pengukuran
+
+Semua di bawah adalah Claude Code v2.1.287 di lingkungan cloud, 2 Okt 2026.
+
+**Biaya tetap per panggilan** (Haiku, prompt "SIAP"):
+
+| Varian | Token input |
+|---|---|
+| Tanpa tool | 946 |
+| Tanpa tool + `--disable-slash-commands` | 946 |
+| Dengan WebSearch + WebFetch | 2.808 |
+
+- Skill dan plugin yang termuat tidak menambah token.
+- Definisi tool web menambah sekitar 1.900 token.
+- Tidak ada cache hit di panggilan sekecil ini.
+
+**Sidang sungguhan** (topik dan konfigurasi sama, `--rounds 2`, masing-masing satu kali):
+
+| | Fase 1 | Fase 2 |
+|---|---|---|
+| Panggilan | 12 | 12 |
+| `total_cost_usd` (estimasi sisi klien) | $2,24 | $1,54 |
+| Hasil | bulat di suara akhir | bulat di suara akhir |
+
+Ini hanya satu sidang per versi, dan isi debatnya berbeda. Di Fase 2, panelis mengusulkan tiga masalah berbeda di ronde 1. Jadi selisih $0,70 **tidak bisa dianggap sepenuhnya hasil optimasi**.
+
+**Rincian Fase 2 per tahap:**
+
+| Tahap | Panggilan | Token input (dari cache) | Token output | Estimasi biaya |
+|---|---|---|---|---|
+| Jawaban panelis | 6 | 145.010 (76.214) | 26.622 | $0,97 |
+| Rangkuman moderator | 2 | 24.081 (0) | 8.708 | $0,37 |
+| Suara akhir | 3 | 21.722 (0) | 10.610 | $0,18 |
+| Merumuskan pertanyaan | 1 | 1.452 (1.450) | 664 | $0,01 |
+
+Temuan:
+
+1. **Jawaban panelis adalah 63% biaya.** Inputnya didominasi hasil pencarian web di dalam satu panggilan: setiap pencarian membuat konteks dikirim ulang. Di sinilah prompt caching Claude Code benar-benar bekerja (76.214 token dibaca dari cache).
+2. **Token output sekitar 2 sampai 17 kali lebih banyak dari teks yang terlihat** (perkiraan kasar: jumlah karakter ÷ 3,5). Selisihnya adalah "thinking". Contoh paling ekstrem: suara akhir Haiku memakai 8.377 token output, sedangkan JSON-nya hanya sekitar 484 token.
+3. **Rangkuman dan suara menulis cache (sekitar 46.000 token) yang tidak pernah dibaca lagi.** Urutan "statis di depan" tidak menghasilkan cache hit di Claude Code. Dugaanku (belum diverifikasi), cache hanya cocok di batas blok pesan, sedangkan seluruh prompt adalah satu blok. Urutan ini tetap dipakai karena tidak merugikan, dan mungkin membantu cache otomatis DeepSeek/OpenAI. Itu juga belum diukur.
+4. **Effort.** Prompt suara akhir yang sama dijalankan dengan Haiku. Effort bawaan menghasilkan 4.753 token output ($0,0276); effort `low` menghasilkan 2.950 token output ($0,0185), atau −38% token dan −33% biaya. Tapi suaranya berubah dari AGREE_WITH_RESERVATIONS menjadi DISAGREE. Itu baru satu sampel, jadi belum bisa dibedakan efek effort atau variasi acak.
+
+### Yang sudah diterapkan
+
+- Token per panggilan dicatat (input, dari cache, output, estimasi biaya), dirinci per peran dan per tahap di laporan. Codex CLI belum melaporkan token.
+- Daftar klaim bersama: klaim ditulis sekali, lalu dirujuk lewat ID.
+- Bagian statis prompt di depan.
+- `--search-budget` (bawaan 3 pencarian per panelis per ronde). Klaim ✅ tidak perlu dicari ulang.
+- `effort` per tahap. Bawaannya hanya `repair: low`, karena perbaikan format JSON tidak menilai apa pun. Tahap lain memakai effort bawaan model.
+- Tidak ada pemotongan. Pengaman 60.000 karakter per teks hanya untuk jawaban yang rusak.
+
+### Opsi berikutnya (belum diterapkan)
+
+| Opsi | Dampak yang diharapkan | Risiko |
+|---|---|---|
+| `--effort vote=low` | Token output suara turun (−38% pada satu sampel) | Bisa mengubah suara |
+| `--search-budget 2` | Token input panelis turun (belum diukur) | Riset lebih dangkal |
+| Moderator hanya mengirim bagian draft yang berubah | Token output moderator turun | Salah menggabungkan bagian |
+| Satu "peneliti" bersama untuk semua pencarian | Pencarian tidak diulang 3× | Panelis kurang independen |
+| Skill gaya "caveman" (jawaban sangat ringkas) | Pembuatnya mengklaim −65% output untuk prosa (belum diverifikasi) | Argumen kehilangan nuansa. Lagi pula skill tidak dipanggil di `claude -p` dengan `--tools` terbatas |
+| Format TOON untuk data terstruktur | Benchmark pihak ketiga mengklaim sekitar 40% lebih hemat dari JSON untuk data seragam (tokenizer GPT) | Prompt sidang kebanyakan prosa, jadi manfaatnya kecil |
+
+### Soal skill dan plugin
+
+- Setiap panggilan sidang adalah `claude -p` baru dengan system prompt sendiri dan tool yang dibatasi. Daftar skill tidak menambah token (diukur di atas), dan tool Skill tidak tersedia, jadi menginstal skill tidak mengubah panggilan sidang.
+- Plugin hemat token di katalog (Token Shield, Token Inspector, token-usage) dirancang untuk sesi Claude Code interaktif yang panjang. Plugin itu berguna untuk sesi kerja kamu sendiri, bukan untuk pipeline sidang ini.
+
+## 17. Sumber
 
 Dibaca langsung:
 
@@ -365,6 +488,8 @@ Dibaca langsung:
 
 Hanya dari hasil pencarian, halamannya belum aku buka (cek sendiri):
 
+- Skill "caveman" (klaim penghematan dari pembuatnya): https://gittrend.io/repo/JuliusBrussee/caveman
+- Format TOON: https://www.analyticsvidhya.com/blog/2025/11/toon-token-oriented-object-notation/ dan https://arxiv.org/pdf/2603.03306
 - Penundaan perubahan billing Agent SDK: https://thenewstack.io/anthropic-pauses-claude-agent-sdk-subscription-change/ dan https://devops.com/anthropic-hits-pause-on-claude-agent-sdk-billing-change-for-now/
 - Codex, mode non-interaktif: https://developers.openai.com/codex/noninteractive. Konfigurasi web search: https://developers.openai.com/codex/config-basic
 - DeepSeek API (sumber sekunder): https://www.morphllm.com/deepseek-api. Docs resmi: https://api-docs.deepseek.com

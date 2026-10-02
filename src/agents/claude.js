@@ -2,6 +2,7 @@
 // Jangan pakai --bare: mode itu tidak membaca login langganan (docs/PLAN.md, F2).
 
 import { cliVersion, runCli } from './cli.js'
+import { fromAnthropicUsage } from './usage.js'
 
 export const WEB_TOOLS = 'WebSearch,WebFetch'
 
@@ -15,12 +16,16 @@ export function safeArg(text) {
     .trim()
 }
 
-export function claudeArgs({ system, model, webSearch = false, extraArgs = [] } = {}) {
+export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+
+export function claudeArgs({ system, model, webSearch = false, effort, extraArgs = [] } = {}) {
   // stream-json (wajib bersama --verbose di mode -p) dipakai agar event "init" terbaca:
   // model, tool, dan plugin yang benar-benar aktif.
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--permission-mode', 'dontAsk']
   if (system) args.push('--system-prompt', safeArg(system))
   if (model) args.push('--model', model)
+  // Porsi "thinking" (penalaran tersembunyi), bagian terbesar token output menurut uji coba (docs/PLAN.md §16).
+  if (effort) args.push('--effort', effort)
   args.push(...extraArgs)
   if (webSearch) args.push('--allowedTools', WEB_TOOLS)
   // --tools menerima banyak nilai, jadi taruh paling akhir. "" = nonaktifkan semua tool.
@@ -61,6 +66,7 @@ export function parseClaudeStream(stdout) {
     text: typeof result.result === 'string' ? result.result : '',
     costUsd: result.total_cost_usd,
     usage: result.usage,
+    tokens: fromAnthropicUsage(result.usage),
     meta: {
       model: init?.model,
       tools: init?.tools,
@@ -81,8 +87,8 @@ export function createClaudeAgent({ id = 'claude', label = 'Claude', bin = 'clau
     extraArgs,
     capabilities: { webSearch: true },
     version: () => cliVersion(bin),
-    async ask({ system, prompt, webSearch = false, model: modelOverride, timeoutMs: t } = {}) {
-      const args = claudeArgs({ system, model: modelOverride || model, webSearch, extraArgs })
+    async ask({ system, prompt, webSearch = false, model: modelOverride, effort, timeoutMs: t } = {}) {
+      const args = claudeArgs({ system, model: modelOverride || model, webSearch, effort, extraArgs })
       let stdout
       try {
         ;({ stdout } = await runCli(bin, args, { input: prompt, timeoutMs: t || timeoutMs, cwd }))
