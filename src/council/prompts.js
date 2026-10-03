@@ -28,10 +28,12 @@ export function clip(text, max = SAFETY_LIMIT) {
   return s.length > max ? `${s.slice(0, max)}… (dipotong pengaman: ${s.length - max} karakter dihapus)` : s
 }
 
-function frameBlock(frame) {
+// Pertanyaan sidang + memori sidang sebelumnya (kalau ada). Keduanya tetap selama sidang, jadi ikut bagian statis.
+function frameBlock(frame, memoryText = '') {
   const lines = [`Pertanyaan sidang: ${frame.question}`]
   if (frame.criteria.length) lines.push('Kriteria keberhasilan:', ...frame.criteria.map((c) => `- ${c}`))
   if (frame.context) lines.push(`Konteks: ${frame.context}`)
+  if (memoryText) lines.push('', memoryText)
   return lines.join('\n')
 }
 
@@ -82,7 +84,7 @@ export function describeResponse(label, response) {
   return lines.join('\n')
 }
 
-export function framePrompt(topic) {
+export function framePrompt(topic, memoryText = '') {
   return [
     'Tahap: FRAME',
     '',
@@ -91,6 +93,7 @@ export function framePrompt(topic) {
     topic,
     '>>>',
     '',
+    ...(memoryText ? [memoryText, ''] : []),
     'Ubah permintaan ini menjadi pertanyaan sidang yang jelas dan 3-5 kriteria keberhasilan yang bisa diperiksa. Jangan menjawab pertanyaannya.',
     '',
     'Balas hanya dengan JSON berformat:',
@@ -102,14 +105,16 @@ export const DEVILS_ADVOCATE =
   'Di ronde ini kamu mendapat giliran sebagai devil\'s advocate: cari kelemahan terbesar draft dan tulis minimal satu kritik serius. ' +
   'Suaramu tetap harus jujur; kalau kelemahannya tidak memblokir, kamu boleh tetap setuju.'
 
-export function panelPrompt({ frame, round, alias, draft, focus, own, others = [], claims = [], aliasOf, webSearch, searchBudget, devilsAdvocate = false }) {
+export function panelPrompt({ frame, memoryText, round, alias, draft, focus, own, others = [], claims = [], aliasOf, webSearch, searchBudget, devilsAdvocate = false }) {
   const blind = round === 1
-  const lines = [frameBlock(frame), '', panelRules({ webSearch, searchBudget }), '', `Tahap: PANEL · Ronde ${round} (${blind ? 'blind' : 'kritik'})`]
+  const lines = [frameBlock(frame, memoryText), '', panelRules({ webSearch, searchBudget }), '', `Tahap: PANEL · Ronde ${round} (${blind ? 'blind' : 'kritik'})`]
   if (alias) lines.push(`Kamu adalah ${alias}.`)
   if (devilsAdvocate) lines.push(DEVILS_ADVOCATE)
   const registry = registryBlock(claims, aliasOf)
   if (blind) {
     lines.push('Ini ronde blind: jawab secara independen. Kamu belum melihat jawaban panelis lain.')
+    // Di ronde 1 daftar klaim hanya berisi klaim dari memori sidang sebelumnya.
+    if (registry) lines.push('', registry)
   } else {
     lines.push('', `Draft kesimpulan moderator dari ronde ${round - 1}:`, '<<<', clip(draft), '>>>')
     if (focus) lines.push(`Fokus ronde ini dari moderator: ${focus}`)
@@ -140,8 +145,8 @@ export function moderatorRules() {
   ].join('\n')
 }
 
-export function judgePrompt({ frame, round, previousDraft, responses, failed = [], claims = [], aliasOf }) {
-  const lines = [frameBlock(frame), '', moderatorRules(), '', `Tahap: JUDGE · Ronde ${round}`]
+export function judgePrompt({ frame, memoryText, round, previousDraft, responses, failed = [], claims = [], aliasOf }) {
+  const lines = [frameBlock(frame, memoryText), '', moderatorRules(), '', `Tahap: JUDGE · Ronde ${round}`]
   if (previousDraft) lines.push('', 'Draft kesimpulan sebelumnya:', '<<<', clip(previousDraft), '>>>')
   const registry = registryBlock(claims, aliasOf)
   if (registry) lines.push('', registry)
@@ -167,8 +172,8 @@ export function voteRules() {
   ].join('\n')
 }
 
-export function votePrompt({ frame, draft, alias, previousVote, claims = [], aliasOf }) {
-  const lines = [frameBlock(frame), '', voteRules(), '', 'Tahap: VOTE']
+export function votePrompt({ frame, memoryText, draft, alias, previousVote, claims = [], aliasOf }) {
+  const lines = [frameBlock(frame, memoryText), '', voteRules(), '', 'Tahap: VOTE']
   if (alias) lines.push(`Kamu adalah ${alias}.`)
   if (previousVote) {
     const objections = previousVote.blocking_objections.length ? ` (keberatan: ${previousVote.blocking_objections.join('; ')})` : ''

@@ -94,6 +94,7 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
             `Moderator: ${event.moderator.label}${event.moderator.model ? ` (${event.moderator.model})` : ''} · maks. ${event.maxRounds} ronde · konsensus: ${event.consensus === 'majority' ? 'mayoritas' : 'bulat'} · web: ${event.web ? 'aktif' : 'mati'} · verifikasi: ${event.verify ? 'aktif' : 'mati'}`
           )
         )
+        for (const m of event.memory || []) print(style.dim(`Melanjutkan: ${m.id} — ${m.question} (${m.claims} klaim ✅ dibawa)`))
         print()
         break
       case 'framed':

@@ -3,6 +3,8 @@
 // event "init" lalu (opsional) pemanggilan tool lalu event "result".
 // Prompt sidang dikenali dari baris "Tahap: ..." dan dijawab dengan JSON yang masuk akal.
 // Mode lewat env FAKE_CLAUDE_MODE: ok (bawaan) | not-logged-in | no-search | plugins | disagree.
+import { fenced, stageAnswer, stageOf } from './stage-answers.js'
+
 const args = process.argv.slice(2)
 if (args[0] === '--version') {
   process.stdout.write('9.9.9 (Claude Code)\n')
@@ -13,29 +15,6 @@ const mode = process.env.FAKE_CLAUDE_MODE || 'ok'
 const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 const out = (ev) => process.stdout.write(JSON.stringify(ev) + '\n')
 const source = process.env.FAKE_URL || 'https://example.invalid/x'
-
-function stageAnswer(stage, input) {
-  const model = flag('--model') || 'fake'
-  const round = Number(input.match(/Tahap: \w+ · Ronde (\d+)/)?.[1] || 0)
-  const vote = { on_draft: mode === 'disagree' ? 'DISAGREE' : 'AGREE', reservations: [], blocking_objections: mode === 'disagree' ? ['belum ada data'] : [] }
-  switch (stage) {
-    case 'FRAME':
-      return { question: 'Ide hackathon apa yang paling layak?', criteria: ['bisa dibuat 48 jam', 'ada data masalahnya'], context: '' }
-    case 'PANEL':
-      return {
-        position: `Posisi ${model} di ronde ${round}`,
-        proposals: [{ id: 'P1', title: 'Aplikasi pencatat keuangan UMKM', why: 'banyak UMKM belum mencatat' }],
-        claims: [{ id: 'C1', text: 'Node.js 24 adalah LTS', kind: 'fact', source_url: source, quote: 'Node.js 24 adalah versi LTS' }],
-        ...(round > 1 ? { critiques: [], changed_mind: { changed: false }, vote } : {})
-      }
-    case 'JUDGE':
-      return { summary: `Ringkasan ronde ${round}`, agreements: ['fokus UMKM'], disagreements: [], draft: `Draft kesimpulan ronde ${round}`, next_focus: 'data pendukung' }
-    case 'VOTE':
-      return { vote }
-    default:
-      return null
-  }
-}
 
 let input = ''
 process.stdin.on('data', (d) => (input += d))
@@ -56,9 +35,9 @@ process.stdin.on('end', () => {
   if (tools.includes('WebSearch') && mode !== 'no-search') {
     out({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', name: 'WebSearch', input: {} }] } })
   }
-  const stage = input.match(/^Tahap: (\w+)/m)?.[1]
+  const stage = stageOf(input)
   let answer
-  if (stage) answer = 'Berikut jawabanku:\n```json\n' + JSON.stringify(stageAnswer(stage, input)) + '\n```'
+  if (stage) answer = fenced(stageAnswer(stage, input, { model: flag('--model') || 'fake', disagree: mode === 'disagree', source }))
   else if (tools.includes('WebSearch')) answer = `Node.js 24 adalah LTS terbaru. Sumber: ${source}.`
   else answer = input.includes('SIAP') ? 'SIAP' : 'tidak tahu'
   out({ type: 'result', subtype: 'success', is_error: false, result: answer, total_cost_usd: 0.001, args })

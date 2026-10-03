@@ -104,3 +104,55 @@ test('agen OpenAI-compatible (DeepSeek): daftar model, chat, dan pesan error', a
 test('createAgent menolak tipe yang tidak dikenal', () => {
   assert.throws(() => createAgent('x', { type: 'gemini' }), /Tipe agen "gemini" tidak dikenal/)
 })
+
+test('agen format Anthropic (DeepSeek): web search di sisi server, pause_turn, token, dan fallback', async (t) => {
+  const api = await startFakeApi()
+  t.after(api.close)
+  process.env.TEST_DS_KEY = 'sk-test'
+  t.after(() => delete process.env.TEST_DS_KEY)
+  const pricing = { input: 0.3, cacheRead: 0.006, output: 1.2 }
+  const agent = createAgent('ds', { type: 'anthropic-compatible', baseURL: `${api.url}/anthropic/`, modelsURL: api.url, model: 'fake-flash', apiKeyEnv: 'TEST_DS_KEY', pricing })
+  assert.equal(agent.type, 'anthropic-compatible')
+  assert.equal(agent.capabilities.webSearch, true)
+  assert.deepEqual(await agent.listModels(), ['fake-flash', 'fake-pro'])
+
+  const plain = await agent.ask({ system: 'peran', prompt: 'Balas: SIAP' })
+  assert.equal(plain.text, 'SIAP')
+  const sent = api.requests.at(-1)
+  assert.equal(sent.url, '/anthropic/v1/messages')
+  assert.equal(sent.apiKey, 'sk-test')
+  assert.equal(sent.auth, 'Bearer sk-test')
+  assert.equal(sent.version, '2023-06-01')
+  assert.equal(sent.body.system, 'peran')
+  assert.equal(sent.body.max_tokens, 32000)
+  assert.equal(sent.body.tools, undefined)
+  assert.deepEqual(plain.tokens, { input: 50, cacheRead: 10, cacheWrite: 0, output: 5 })
+  assert.ok(Math.abs(plain.costUsd - (50 * 0.3 + 10 * 0.006 + 5 * 1.2) / 1e6) < 1e-12)
+
+  const web = await agent.ask({ prompt: 'cari', webSearch: true })
+  assert.deepEqual(api.requests.at(-1).body.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }])
+  assert.equal(web.text, `Node.js 24 adalah LTS terbaru. Sumber: ${api.url}/source`)
+  assert.deepEqual(web.meta.toolUses, { web_search: 1 })
+  assert.deepEqual(web.meta.searchUrls, [`${api.url}/source`])
+  assert.equal(web.meta.webSearchRequests, 1)
+
+  const before = api.requests.length
+  const paused = await agent.ask({ prompt: 'PAUSE lalu cari', webSearch: true })
+  assert.equal(api.requests.length - before, 2)
+  assert.deepEqual(api.requests.at(-1).body.messages.map((m) => m.role), ['user', 'assistant'])
+  assert.deepEqual(paused.tokens, { input: 100, cacheRead: 20, cacheWrite: 0, output: 10 })
+  assert.deepEqual(paused.meta.toolUses, { web_search: 2 })
+
+  assert.equal((await agent.ask({ prompt: 'PANJANG' })).meta.stopReason, 'max_tokens')
+  await assert.rejects(agent.ask({ prompt: 'x', model: 'tidak-ada' }), /HTTP 400: Model Not Exist/)
+  await assert.rejects(createAgent('ds', { type: 'anthropic-compatible', baseURL: `${api.url}/anthropic`, apiKeyEnv: 'TEST_DS_KEY' }).ask({ prompt: 'x' }), /belum diisi/)
+
+  const strict = await startFakeApi({ rejectSearch: true })
+  t.after(strict.close)
+  const fallback = createAgent('ds', { type: 'anthropic-compatible', baseURL: `${strict.url}/anthropic`, model: 'fake-flash', apiKeyEnv: 'TEST_DS_KEY' })
+  const r = await fallback.ask({ prompt: 'cari', webSearch: true })
+  assert.match(r.meta.searchFallback, /unknown tool type/)
+  assert.equal(r.text, 'jawaban untuk: cari')
+  process.env.TEST_DS_KEY = 'salah'
+  await assert.rejects(fallback.ask({ prompt: 'cari', webSearch: true }), /HTTP 401/)
+})

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>The Council</title>
+    <meta name="description" content="Sidang debat beberapa agen AI yang berbasis data dan fakta." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8F%9B%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="#/baru">🏛️ The Council</a>
+      <nav id="nav" hidden>
+        <a href="#/baru" data-tab="baru">Sidang baru</a>
+        <a href="#/riwayat" data-tab="riwayat">Riwayat</a>
+        <a href="#/cek" data-tab="cek">Cek agen</a>
+        <button id="logout" class="link" type="button" hidden>Keluar</button>
+      </nav>
+    </header>
+
+    <main id="app">
+      <section id="view-login" class="view card narrow" hidden>
+        <h1>Masuk</h1>
+        <form id="login-form">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+          <button type="submit">Masuk</button>
+          <p class="error" id="login-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="view-baru" class="view" hidden>
+        <h1>Sidang baru</h1>
+        <form id="run-form" class="card">
+          <label for="topic">Topik atau pertanyaan</label>
+          <textarea id="topic" name="topic" rows="4" required placeholder="Contoh: Ide hackathon 48 jam untuk masalah keuangan UMKM di Indonesia"></textarea>
+
+          <fieldset>
+            <legend>Model tiap agen</legend>
+            <div id="model-fields" class="grid"></div>
+            <p class="hint" id="model-hint"></p>
+          </fieldset>
+
+          <div class="row">
+            <label>Ronde maks.
+              <select id="rounds"></select>
+            </label>
+            <label>Konsensus
+              <select id="consensus">
+                <option value="unanimous">bulat</option>
+                <option value="majority">mayoritas</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="web" checked /> Web search</label>
+            <label class="check"><input type="checkbox" id="verify" checked /> Verifikasi sumber</label>
+          </div>
+
+          <fieldset id="memory-box" hidden>
+            <legend>Lanjutkan dari sidang sebelumnya (opsional)</legend>
+            <p class="hint">Kesimpulan dan klaim ✅ sidang yang dipilih ikut dibawa apa adanya, tanpa diringkas ulang.</p>
+            <div id="memory-list" class="stack"></div>
+          </fieldset>
+
+          <button type="submit" id="start">Mulai sidang</button>
+          <p class="error" id="run-error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="view-riwayat" class="view" hidden>
+        <h1>Riwayat sidang</h1>
+        <div id="run-list" class="stack"></div>
+      </section>
+
+      <section id="view-cek" class="view" hidden>
+        <h1>Cek agen</h1>
+        <div class="card">
+          <p>Cek cepat hanya memeriksa API key dan daftar model (atau CLI terpasang, di PC sendiri). Cek lengkap juga mengirim pertanyaan uji dan menguji web search, jadi memakai sedikit token.</p>
+          <div class="row">
+            <button type="button" id="doctor-quick">Cek cepat</button>
+            <button type="button" id="doctor-full" class="secondary">Cek lengkap</button>
+          </div>
+        </div>
+        <div id="doctor-result" class="stack"></div>
+      </section>
+
+      <section id="view-sidang" class="view" hidden>
+        <div id="run-status" class="status-bar"></div>
+        <div id="timeline" class="stack"></div>
+        <details id="claims-box" class="card" hidden>
+          <summary>Klaim dan sumber <span id="claims-count"></span></summary>
+          <div class="table-wrap"><table id="claims-table"></table></div>
+        </details>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

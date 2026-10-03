@@ -51,7 +51,7 @@ export async function checkAgent(agent, { quick = false, web = true, moderatorMo
   let model = agent.model || ''
 
   // 1. Terpasang (CLI) atau API key + daftar model (API)
-  if (agent.type === 'openai-compatible') {
+  if (typeof agent.hasKey === 'function') {
     if (!agent.hasKey()) add('API key', 'fail', `${agent.apiKeyEnv} belum diisi di .env`)
     else {
       add('API key', 'ok', `${agent.apiKeyEnv} terisi`)
@@ -107,12 +107,14 @@ export async function checkAgent(agent, { quick = false, web = true, moderatorMo
   else if (!agent.capabilities.webSearch) add('web search', 'skip', 'tidak ada bawaan; di Fase 2 diberi paket bukti dari agen lain')
   else {
     try {
-      const { value, ms } = await timed(() => agent.ask({ system: DOCTOR_SYSTEM, prompt: WEB_PROMPT, webSearch: true }))
+      const { value, ms } = await timed(() => agent.ask({ system: DOCTOR_SYSTEM, prompt: WEB_PROMPT, webSearch: true, model: model || undefined }))
       const urls = extractUrls(value.text)
       const toolUses = value.meta?.toolUses
       const answer = snippet(value.text)
       if (Array.isArray(value.meta?.tools) && !value.meta.tools.includes('WebSearch')) {
         add('web search', 'fail', 'tool WebSearch tidak tersedia di sesi ini', answer)
+      } else if (value.meta?.searchFallback) {
+        add('web search', 'warn', `endpoint menolak tool web search, dijawab tanpa pencarian (${value.meta.searchFallback})`, answer)
       } else if (!urls.length) {
         add('web search', 'warn', `tidak ada URL di jawaban · ${secs(ms)}`, answer)
       } else {
@@ -120,7 +122,7 @@ export async function checkAgent(agent, { quick = false, web = true, moderatorMo
         const reach = page.ok ? `HTTP ${page.status}` : `tidak bisa dibuka (${page.status ? `HTTP ${page.status}` : page.error})`
         let status = page.ok ? 'ok' : 'warn'
         let note = ''
-        if (toolUses && !toolUses.WebSearch && !toolUses.WebFetch) {
+        if (toolUses && !toolUses.WebSearch && !toolUses.WebFetch && !toolUses.web_search) {
           status = 'warn'
           note = ' · tool web tidak dipanggil, URL mungkin dari ingatan'
         } else if (!toolUses) note = ' · cek jawabannya: tidak bisa dipastikan pencarian benar-benar dilakukan'

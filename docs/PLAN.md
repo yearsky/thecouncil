@@ -1,6 +1,6 @@
 # The Council — Rencana Implementasi
 
-> Status: **Fase 2**. `council run` (debat dengan verifikasi sumber) dan `council doctor` sudah ada. Keduanya sudah dicoba dengan Claude asli di lingkungan cloud, tapi belum di Windows. Rencana ditulis 2 Oktober 2026.
+> Status: **Fase 3**. `council run` (debat dengan verifikasi sumber), `council doctor`, `council ui` (UI web lokal), dan mode server di Vercel dengan DeepSeek (§18) sudah ada. `run` dan `doctor` sudah dicoba dengan Claude asli di lingkungan cloud, tapi belum di Windows. Mode server baru diuji dengan server palsu: belum dengan DeepSeek, Upstash, atau Vercel asli. Rencana ditulis 2 Oktober 2026, diperbarui 3 Oktober 2026.
 > Yang ditandai **[cek]** belum aku verifikasi langsung. Cek dulu di Fase 0 sebelum diandalkan.
 
 ## Keputusan
@@ -13,6 +13,9 @@
 | K4 | 2 Okt 2026 | Fase 0 dibuat **tanpa dependensi npm**: `fetch` bawaan Node untuk DeepSeek, `process.loadEnvFile` untuk `.env`, dan warna ANSI sederhana. |
 | K5 | 2 Okt 2026 | Panel boleh berisi **beberapa agen Claude dengan model berbeda** (Opus, Sonnet, Haiku), cukup dengan satu langganan Claude. Contohnya ada di `examples/claude-only.json`. |
 | K6 | 2 Okt 2026 | Hemat token **tanpa memotong atau meringkas isi debat**, karena memotong bisa menimbulkan bias. Penghematan hanya lewat: tidak mengulang isi, mengukur pemakaian, dan pengaturan yang tidak mengubah isi (§16). |
+| K7 | 3 Okt 2026 | **Mode server (Vercel) hanya memakai agen API** yang dibayar per token (DeepSeek). Claude dan Codex lewat login langganan tetap hanya di PC sendiri (`council run`, `council ui`), sesuai F3. |
+| K8 | 3 Okt 2026 | **Mode sesi: fresh + memori sidang.** Tiap panggilan tetap berdiri sendiri; tidak ada sesi permanen per agen dan tidak ada compact otomatis (compact = meringkas, bertentangan dengan K6). Kesinambungan lewat memori sidang yang dipilih eksplisit: kesimpulan + klaim ✅ sidang lama, dibawa apa adanya (§18). |
+| K9 | 3 Okt 2026 | Sidang di server **dijeda kalau tidak ada yang membuka**, lalu lanjut sendiri saat dibuka lagi (browser atau bot). Tidak memakai Vercel Workflow, supaya tetap tanpa framework. |
 
 ## 1. Tujuan
 
@@ -41,7 +44,7 @@ Kegunaan berikutnya (fase akhir): kolaborasi coding antar agen.
 | F4 | Mei 2026, Anthropic mengumumkan bahwa mulai 15 Juni 2026 pemakaian `claude -p`/Agent SDK dipindah ke kredit terpisah. Rencana itu **ditunda**. Media mengutip halaman support Anthropic: "For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits." | Sedang. Ini dari sumber sekunder; halaman support aslinya tidak aku buka. | Kebijakan ini bisa berubah lagi. Catat pemakaian tiap panggilan (`total_cost_usd` di output JSON, yang merupakan estimasi sisi klien), dan sediakan opsi API key untuk tiap agen. |
 | F5 | Codex CLI bisa jalan non-interaktif lewat `codex exec`: prompt via stdin (`-`), output JSONL dengan `--json`, plus `--output-last-message`, `--sandbox read-only`, dan `--ephemeral`. `chatbot-wa` sudah memakai ini dengan login akun ChatGPT di Windows. Web search: `--search` atau `-c web_search="live"` **[cek]**. | Tinggi untuk `exec` (sudah jalan di kodemu). Sedang untuk web search: hanya dari ringkasan hasil pencarian, karena docs OpenAI tidak bisa dibuka dari lingkunganku. | Codex jadi panelis. Web search dicek di Fase 0. |
 | F6 | **Gemini CLI berhenti melayani akun individu** (gratis, Google AI Pro, Ultra) sejak 18 Juni 2026; penggunanya diarahkan ke Antigravity CLI. Login dengan API key tetap jalan. Sumbernya diskusi resmi di repo `google-gemini/gemini-cli`. README Gemini CLI masih menyebut free tier login Google, kemungkinan belum diperbarui. | Tinggi untuk penghentiannya. Aku **tidak tahu** apakah Antigravity CLI punya mode headless. | Gemini tidak dipakai dulu (K2). Kalau nanti ditambahkan, pakai Gemini API key. |
-| F7 | DeepSeek API memakai format OpenAI (base URL `https://api.deepseek.com`) dan dibayar per token. Nama model saat ini **[cek]**: sumber sekunder menyebut `deepseek-v4-flash` dan `deepseek-v4-pro`, tapi docs resmi tidak bisa aku buka. Aku juga tidak menemukan bukti ada web search bawaan di API-nya **[cek]**. | Sedang | Dipanggil dengan `fetch` bawaan Node (K4). Nama model diambil dari config dan dicek lewat `GET /models` di `council doctor`. Untuk data internet, DeepSeek perlu dibantu (lihat §6). |
+| F7 | DeepSeek API dibayar per token dan punya dua format: OpenAI (`https://api.deepseek.com`) dan Anthropic (`https://api.deepseek.com/anthropic`). Endpoint OpenAI tidak bisa browsing sendiri. Endpoint Anthropic punya **web search di sisi server** (tool `web_search_20250305`, blok `server_tool_use`/`web_search_tool_result`), menurut docs DeepSeek yang dikutip di issue opencode #32273 **[cek]**. Nama model **[cek]**: sumber sekunder menyebut keluarga V4 dan bahwa `deepseek-chat`/`deepseek-reasoner` sudah dipensiunkan, tapi nama persisnya berbeda antar-sumber (`deepseek-flash` vs `deepseek-v4-flash`). | Sedang. Docs resmi DeepSeek diblokir proxy di lingkunganku, jadi semuanya dari sumber sekunder atau kutipan. | Sejak Fase 3, agen `deepseek` bawaan memakai endpoint Anthropic (`src/agents/anthropicCompat.js`) supaya bisa web search. Kalau endpoint menolak tool-nya, agen menjawab tanpa pencarian dan doctor memberi peringatan. Nama model dipilih dari `GET /models`. |
 | F8 | Pola serupa sudah ada: **llm-council** (Andrej Karpathy). Alurnya: jawaban awal paralel, lalu peer review **anonim** (supaya model tidak pilih kasih), lalu "Chairman" menyusun jawaban akhir. Bedanya, itu web app lewat OpenRouter (API), bukan CLI berlangganan, dan tidak mewajibkan konsensus. | Sedang (dari artikel, bukan dari repo-nya langsung) | Pinjam ide anonimisasi dan moderator/chairman. |
 | F9 | `chatbot-wa/src/ai/cli.js` sudah menangani jebakan Windows: CLI `.cmd` butuh `shell`, argumen di-quote manual, prompt dikirim lewat stdin, dan `taskkill /T /F` untuk mematikan seluruh pohon proses. Ada juga pola test `fakeBin()` yang membungkus fixture jadi `.cmd`. | Tinggi (kodenya aku baca langsung) | **Salin dan pakai ulang**, jangan tulis ulang. |
 | F10 | Claude Code v2.1.287 punya flag `--restricted`, yang antara lain mengabaikan file settings user/project/local. Di uji coba cloud, login tetap jalan, tapi plugin **tetap termuat** dengan flag itu. Di Windows mungkin hasilnya berbeda. | Sedang (satu uji coba, bukan di Windows) | Tidak dipakai secara bawaan. Doctor menampilkan plugin/MCP yang ikut termuat sebagai info. `--restricted` bisa dicoba lewat `extraArgs`. |
@@ -212,19 +215,28 @@ thecouncil/
 │  │  ├─ cli.js                # disalin dari chatbot-wa/src/ai/cli.js
 │  │  ├─ claude.js             # pola dari chatbot-wa/src/ai/claudeCli.js
 │  │  ├─ codex.js              # pola dari chatbot-wa/src/ai/codexCli.js
-│  │  ├─ openaiCompat.js       # DeepSeek + provider lain yang kompatibel OpenAI
+│  │  ├─ openaiCompat.js       # provider yang kompatibel OpenAI (daftar model DeepSeek)
+│  │  ├─ anthropicCompat.js    # DeepSeek lewat format Anthropic + web search di sisi server (Fase 3)
 │  │  └─ index.js              # registry agen dari config
 │  ├─ council/
 │  │  ├─ protocol.js           # state machine FRAME → RONDE → JUDGE → LAPORAN
 │  │  ├─ prompts.js            # prompt moderator, panelis, devil's advocate
 │  │  ├─ schema.js             # skema JSON + validasi + permintaan perbaikan
 │  │  ├─ consensus.js          # hitung suara, kondisi berhenti
+│  │  ├─ memory.js             # memori sidang untuk "lanjutkan" (Fase 3)
 │  │  └─ anonymize.js
+│  ├─ cloud/                   # Fase 3, §18: app.js (API), runner.js + journal.js (sidang dicicil),
+│  │                           #   auth.js, config.js, seed.js
+│  ├─ server.js                # `council ui`: server lokal untuk API + public/
 │  ├─ evidence/verify.js       # fetch URL + cek kutipan
 │  ├─ ui/style.js              # warna ANSI
 │  ├─ ui/terminal.js           # tampilan chat berwarna + baris status
 │  ├─ ui/panes.js              # opsional: wt split-pane
-│  └─ store/session.js         # sessions/<waktu>_<slug>/events.jsonl, report.md, <agen>.log
+│  ├─ store/session.js         # sessions/<waktu>_<slug>/events.jsonl, report.md, memory.json
+│  └─ store/kv.js              # memoryKv (lokal/test) dan upstashKv (REST, Vercel)
+├─ api/index.js                # fungsi Vercel untuk /api/*
+├─ public/                     # UI web: index.html, app.js, style.css
+├─ vercel.json
 ├─ test/
 │  ├─ helpers.js               # fakeBin() dari chatbot-wa
 │  ├─ fixtures/                # fake-claude.js, fake-codex.js, ...
@@ -233,7 +245,7 @@ thecouncil/
 └─ docs/PLAN.md
 ```
 
-Gaya kode mengikuti `chatbot-wa`: JavaScript ESM tanpa build step, test dengan `node --test`, dependensi seminimal mungkin. Sampai Fase 0 belum ada dependensi npm sama sekali (K4).
+Gaya kode mengikuti `chatbot-wa`: JavaScript ESM tanpa build step, test dengan `node --test`, dependensi seminimal mungkin. CLI tetap tanpa dependensi npm (K4). Satu-satunya dependensi, `@vercel/functions` (untuk `waitUntil` dan `getDeadline`), hanya di-import oleh `api/index.js`.
 
 Config yang dipakai ada di `council.config.example.json`. Intinya:
 
@@ -246,7 +258,7 @@ Config yang dipakai ada di `council.config.example.json`. Intinya:
   "agents": {
     "claude": { "type": "claude-cli", "model": "sonnet" },
     "codex": { "type": "codex-cli", "model": "", "webSearchArgs": ["-c", "web_search=live"] },
-    "deepseek": { "type": "openai-compatible", "baseURL": "https://api.deepseek.com", "model": "", "apiKeyEnv": "DEEPSEEK_API_KEY" }
+    "deepseek": { "type": "anthropic-compatible", "baseURL": "https://api.deepseek.com/anthropic", "modelsURL": "https://api.deepseek.com", "model": "", "apiKeyEnv": "DEEPSEEK_API_KEY", "maxTokens": 32000 }
   }
 }
 ```
@@ -275,6 +287,10 @@ Catatan:
 - `response` di `agent_finished` berisi jawaban panelis yang sudah divalidasi (format di §5). Di pemungutan suara akhir isinya hanya `{"vote": ...}`.
 - `final: true` hanya muncul pada `votes` dari pemungutan suara akhir.
 - Event `verified` (hasil verifier sumber) ditambahkan di Fase 2.
+- Fase 3:
+  - `session_started` mendapat `memory` (sidang yang dilanjutkan) dan `memoryClaims` (klaim ✅ yang dibawa), hanya kalau ada memori.
+  - Event baru `cancelled` (mode server).
+  - Di mode server, setiap event yang disimpan mendapat `seq` (nomor urut) dan `id` (tetap per kejadian, mis. `agent_finished:2:deepseek-pro:`). `finished` membawa `run` (ID sidang) sebagai ganti `session`/`report`.
 - Semua event juga disimpan di `sessions/<id>/events.jsonl`.
 
 Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: menambah field boleh, mengganti nama field jangan.
@@ -290,12 +306,27 @@ Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: me
 - Bot dan Council jalan di PC yang sama, jadi login `claude` dan `codex` dipakai bersama. Konsekuensinya, PC harus menyala.
 - Bot tetap owner-only (lihat F3).
 
+**Alternatif sejak Fase 3: lewat API di Vercel** (§18), kalau semua agen DeepSeek. Bot tidak perlu menjalankan apa pun selain HTTP:
+
+- `POST /api/runs` dengan header `Authorization: Bearer <COUNCIL_API_TOKEN>` dan body `{"topic": "...", "models": {...}}`.
+- Panggil `GET /api/runs/<id>/events/<n>` berkala. Setiap panggilan sekaligus melanjutkan sidang yang dijeda (K9), jadi bot yang menunggu hasil juga yang menggerakkan sidang.
+- Hasil akhir ada di event `finished`; laporan lengkap di `GET /api/runs/<id>/report`.
+- Batal: `POST /api/runs/<id>/cancel`.
+
 ## 12. Keamanan
 
 - Dalam mode debat, agen **tidak boleh menulis file atau menjalankan shell**. Claude dibatasi lewat `--tools` (hanya `WebSearch` dan `WebFetch`), Codex lewat `--sandbox read-only`. Working directory-nya folder sesi yang kosong, bukan folder proyekmu.
 - API key hanya disimpan di `.env`, yang masuk `.gitignore`. Folder `sessions/` juga di-ignore karena bisa berisi data pribadi.
 - Konten web diperlakukan sebagai data, bukan instruksi. Verifikasi sumber dilakukan oleh kode.
 - Mode coding (Fase 5) baru boleh menulis file, dan hanya di git worktree terpisah.
+- **Mode server (§18):**
+  - Domain produksi Vercel paket Hobby bisa dibuka siapa saja (Deployment Protection standar tidak melindunginya, menurut hasil pencarian **[cek]**). Karena itu semua API kecuali `health`, `me`, dan `login` wajib login.
+  - Login: satu password (`COUNCIL_PASSWORD`), dibandingkan secara waktu-konstan, lalu cookie HttpOnly bertanda tangan HMAC berlaku 30 hari. Setelah 10 kali salah dari IP yang sama, login dikunci 15 menit.
+  - Bot memakai token terpisah (`COUNCIL_API_TOKEN`).
+  - Tanpa `COUNCIL_PASSWORD`, server menolak semua sidang.
+  - Batas sidang per hari (bawaan 10) dan hanya satu sidang berjalan pada satu waktu, supaya saldo DeepSeek tidak terkuras.
+  - API key DeepSeek dan token Redis hanya ada di env Vercel; tidak pernah dikirim ke browser atau disimpan di config sidang.
+  - Agen CLI (login langganan) ditolak di server (K7).
 
 ## 13. Fase pengerjaan
 
@@ -368,10 +399,21 @@ Fase dianggap selesai kalau kriteria "Selesai bila" terpenuhi. Aku tidak memberi
   - Ke-13 klaim berstatus ❔, karena proxy egress lingkungan cloud menolak situs-situs sumbernya (HTTP 403 pada CONNECT). Situs yang diizinkan, seperti nodejs.org, terbaca normal. Di PC sendiri, hal ini seharusnya tidak terjadi, kecuali situsnya memang memblokir bot.
 - **Selesai bila:** laporan memuat tabel klaim dengan status ✅/⚠️/❌, dan kesimpulannya tidak bergantung pada klaim ❌. Kriteria ini terpenuhi di cloud. Namun status ✅ dan ❌ dari situs sungguhan baru terlihat di uji lokal; di cloud yang muncul hanya ❔ karena proxy.
 
-### Fase 3 — Pengalaman terminal
+### Fase 3 — UI web dan mode server (Vercel + DeepSeek)
 
-- Status live, streaming ke `<agen>.log`, opsi `--panes` (Windows Terminal), `council replay <sesi>`, dan skill `/council` untuk Claude Code.
-- **Selesai bila:** satu sidang bisa ditonton per agen di panel terpisah, dan `/council <topik>` dari Claude Code menampilkan ringkasan hasilnya.
+**Status:** kode selesai dan diuji dengan server palsu (94 test). Belum diuji dengan DeepSeek, Upstash, atau Vercel asli, karena butuh API key dan akun milikmu. Detailnya di §18.
+
+- `src/agents/anthropicCompat.js`: agen DeepSeek lewat endpoint Anthropic, dengan web search di sisi server.
+- Memori sidang (K8): `council run --lanjut <folder sesi>`, dan pilihan "Lanjutkan dari…" di UI.
+- Sidang yang dicicil (K9): jurnal panggilan + pemutaran ulang yang deterministik (`src/cloud/`).
+- API (`src/cloud/app.js`) dan UI web tanpa framework (`public/`), dipakai di dua tempat:
+  - Vercel (`api/index.js`, `vercel.json`) dengan Upstash Redis: hanya agen API.
+  - `council ui` di PC sendiri (127.0.0.1): boleh memakai Claude/Codex lewat login langganan.
+- **Selesai bila:** di Vercel, satu sidang DeepSeek dengan web search selesai dari browser HP, laporannya bisa diunduh, dan sidang berikutnya bisa melanjutkan memorinya. **Menunggu dijalankan olehmu.**
+
+### Fase 3b — Pengalaman terminal (nanti)
+
+- Streaming ke `<agen>.log`, opsi `--panes` (Windows Terminal), `council replay <sesi>`, dan skill `/council` untuk Claude Code. Sebagian kebutuhannya (menonton per agen) kini terjawab oleh `council ui`.
 
 ### Fase 4 — WhatsApp
 
@@ -401,8 +443,8 @@ Sudah dijawab: peran Claude (K1), Gemini (K2), dan bahasa (K3).
 
 Masih terbuka:
 
-1. Untuk DeepSeek, cukup "paket bukti" (default), atau kamu mau API pencarian tambahan? Diputuskan sebelum Fase 2.
-2. `chatbot-wa` memanggil `thecouncil` sebagai subprocess (rekomendasiku), atau meng-import-nya sebagai library? Diputuskan sebelum Fase 4.
+1. Web search DeepSeek: sejak Fase 3 memakai pencarian bawaan endpoint Anthropic (F7). Kalau di uji asli ternyata tidak jalan, pilihannya kembali ke "paket bukti", atau API pencarian tambahan (butuh key lain).
+2. `chatbot-wa` memanggil `thecouncil` sebagai subprocess, meng-import-nya sebagai library, atau memanggil API Vercel (§11)? Diputuskan sebelum Fase 4. Kalau semua agen DeepSeek, API Vercel paling sederhana.
 
 ## 16. Hemat token tanpa memotong isi (K6)
 
@@ -493,4 +535,73 @@ Hanya dari hasil pencarian, halamannya belum aku buka (cek sendiri):
 - Penundaan perubahan billing Agent SDK: https://thenewstack.io/anthropic-pauses-claude-agent-sdk-subscription-change/ dan https://devops.com/anthropic-hits-pause-on-claude-agent-sdk-billing-change-for-now/
 - Codex, mode non-interaktif: https://developers.openai.com/codex/noninteractive. Konfigurasi web search: https://developers.openai.com/codex/config-basic
 - DeepSeek API (sumber sekunder): https://www.morphllm.com/deepseek-api. Docs resmi: https://api-docs.deepseek.com
+- DeepSeek, format Anthropic dan web search: https://api-docs.deepseek.com/guides/anthropic_api/ (diblokir proxy, tidak terbaca). Kutipan docs-nya ada di https://github.com/anomalyco/opencode/issues/32273 (terbaca), dan contoh kode di https://github.com/mengrru/Spherse/pull/105 (terbaca)
+- Harga dan nama model DeepSeek (sumber sekunder, saling berbeda): https://benchlm.ai/deepseek/api-pricing dan https://www.nxcode.io/resources/news/deepseek-api-pricing-complete-guide-2026
+- Vercel Functions, batas durasi: https://vercel.com/docs/functions/limitations dan https://vercel.com/changelog/higher-defaults-and-limits-for-vercel-functions-running-fluid-compute
+- Vercel Deployment Protection: https://vercel.com/docs/deployments/deployment-protection
+- Vercel Storage / Marketplace (Upstash, Neon): https://vercel.com/docs/storage
+- Vercel Functions, runtime Node.js (export `GET`/`POST` Web-standard, `waitUntil`): https://vercel.com/docs/functions/runtimes/node-js dan https://vercel.com/docs/functions/functions-api-reference
+- Vercel Workflow (tidak dipakai, K9): https://www.createwith.com/tool/vercel/updates/vercel-workflows-reaches-general-availability-for-long-running-processes
+
+Dibaca langsung dari paket npm `@vercel/functions` 3.9.11: `waitUntil` dan `getDeadline` ("Returns the shared invocation deadline for the current function invocation").
 - llm-council (Karpathy): https://www.analyticsvidhya.com/blog/2025/12/llm-council-by-andrej-karpathy/
+
+## 18. Mode server (Vercel + DeepSeek) dan UI web (Fase 3)
+
+### Kenapa bentuknya begini
+
+- **Batas durasi fungsi.** Menurut hasil pencarian (docs Vercel diblokir proxy di lingkunganku **[cek]**), dengan Fluid compute fungsi Hobby maksimal 300 dtk dan Pro 800 dtk. Sidang Claude ke-2 di §16 butuh total 511 dtk waktu panggilan, jadi satu sidang bisa lebih lama dari satu fungsi.
+- **Tidak ada disk permanen** di Vercel, jadi status disimpan di Upstash Redis (Vercel Marketplace), dipanggil lewat REST dengan `fetch` biasa.
+- **Domain publik** di Hobby: lihat §12.
+
+### Sidang yang dicicil (`src/cloud/runner.js`, `src/cloud/journal.js`)
+
+1. `POST /api/runs` menyimpan sidang baru (topik, config tanpa rahasia, seed acak, memori yang dibawa), lalu memulai slice pertama lewat `waitUntil`.
+2. Setiap slice memutar ulang `runCouncil()` dari awal:
+   - Panggilan AI yang sudah pernah selesai, termasuk yang gagal, diambil dari jurnal di Redis, tanpa memanggil API lagi.
+   - Panggilan baru hanya dimulai kalau masih ada waktu untuk satu panggilan penuh: batas fungsi (dari `getDeadline()` Vercel, atau 300 dtk) dikurangi timeout panggilan (180 dtk) dan margin (20 dtk). Kalau tidak, slice berhenti dengan sinyal "jeda", setelah menunggu panggilan yang sedang berjalan selesai dan tercatat.
+   - Hasil verifikasi sumber juga dijurnal.
+3. Supaya pemutaran ulang menghasilkan sidang yang persis sama:
+   - Alias Panelis A/B/C diacak dari seed sidang (`mulberry32`).
+   - Setiap hasil (dari jurnal maupun panggilan baru) diserahkan ke sidang menurut nomor urut selesainya di slice aslinya. Urutan ini menentukan ID klaim (K1, K2, …), yang ikut masuk prompt tahap berikutnya. Tanpa ini, kunci jurnal tahap berikutnya bisa berbeda dan panggilan AI terulang.
+   - Event diberi ID tetap per kejadian, jadi event yang sama tidak disimpan dua kali.
+   - Diuji dengan sidang yang dipaksa terpotong di tengah ronde paralel dalam banyak slice, dengan urutan selesai acak di tiap slice, lalu diputar ulang dari jurnal saja: tidak ada panggilan AI yang terulang dan event-nya identik.
+4. Slice berikutnya dimulai oleh siapa pun yang membuka sidang (`GET /api/runs/<id>/events/<n>`), kalau sidang belum selesai dan tidak ada slice yang berjalan (kunci `SET NX` di Redis). Jadi sidang **berhenti sementara kalau tidak ada yang membuka** (K9), dan lanjut sendiri begitu dibuka lagi.
+5. Kalau jurnal gagal disimpan, sidang dihentikan dengan pesan jelas, karena tanpa jurnal slice berikutnya bisa mendapat jawaban berbeda.
+
+Kunci Redis: `run:<id>:meta|events|journal|lock|cancel|report`, `memory:<id>`, `runs`, `active`, `quota:<tanggal>`, `login-fail:<ip>`, `models`.
+
+### Memori sidang (K8)
+
+- Saat sidang selesai, disimpan: topik, pertanyaan, status, ringkasan, draft akhir, dan klaim ✅ (teks, URL, kutipan, hasil verifikasi). Isinya diambil persis dari hasil sidang, bukan ringkasan buatan AI.
+- Sidang baru yang memilih "Lanjutkan dari…" (UI) atau `--lanjut` (CLI):
+  - Klaim ✅ lama langsung masuk daftar klaim dengan ID-K dan tidak dicek ulang.
+  - Blok "Memori sidang sebelumnya" masuk ke bagian statis semua prompt (frame, panel, judge, vote), dengan aturan bahwa memori adalah konteks, bukan bukti baru.
+  - Laporan mencatat sidang mana yang dilanjutkan.
+- Konsekuensi yang perlu diketahui: ronde blind tidak lagi sepenuhnya "bersih", karena semua panelis melihat kesimpulan lama. Ini memang yang diminta saat memilih "lanjutkan".
+- Status ✅ yang dibawa adalah hasil cek di sidang lama. Halaman sumbernya bisa sudah berubah.
+
+### Agen DeepSeek (`src/agents/anthropicCompat.js`)
+
+- `POST <baseURL>/v1/messages` dengan header `x-api-key` dan `Authorization: Bearer` (keduanya, karena docs Claude Code DeepSeek memakai `ANTHROPIC_AUTH_TOKEN` **[cek]**), plus `anthropic-version: 2023-06-01`.
+- Web search: `tools: [{"type": "web_search_20250305", "name": "web_search", "max_uses": <searchBudget>}]`. URL hasil pencarian dicatat di `meta.searchUrls`.
+- `stop_reason: "pause_turn"` dilanjutkan otomatis (maks. 3 kali).
+- `stop_reason: "max_tokens"` dicatat dan muncul di laporan sebagai peringatan, karena jawabannya mungkin terpotong. `maxTokens` bawaan 32.000.
+- Kalau endpoint menolak tool web search (HTTP 4xx selain 401/402/429), agen mencoba sekali tanpa tool dan mencatat alasannya; doctor menampilkannya sebagai peringatan.
+- Biaya hanya dihitung kalau `pricing` (USD per 1 juta token: `input`, `cacheRead`, `output`) diisi di config agen. Harga DeepSeek tidak di-hardcode karena berubah dan ada harga jam sibuk/sepi.
+
+### Perkiraan biaya (kasar)
+
+Token sidang Claude ke-2 (§16: 192.265 token input, 77.664 di antaranya dari cache, 46.604 output), dikalikan harga DeepSeek dari sumber sekunder (jam sibuk; Flash $0,30 input, $0,006 dari cache, $1,20 output per 1 juta token), hasilnya sekitar **$0,09** per sidang. Dengan Pro, batas atasnya sekitar **$0,44** (semua input dihitung tanpa cache). Ini perkiraan, bukan fakta: jumlah token DeepSeek akan berbeda, harga dari sumber sekunder bisa salah atau berubah, dan biaya web search DeepSeek belum aku ketahui. Laporan setiap sidang mencatat token yang sebenarnya.
+
+### Risiko kualitas: panel satu keluarga model
+
+Kalau semua panelis DeepSeek, kesalahannya cenderung sama, jadi debat kurang independen dibanding panel Claude/Codex/DeepSeek. Mitigasi yang ada: campur model (mis. Pro dan Flash), alias anonim, devil's advocate, dan verifier sumber oleh program. Seberapa besar efeknya belum diukur.
+
+### Yang belum diverifikasi
+
+- Semua perilaku API DeepSeek asli (nama model, web search, format usage, header).
+- Nama env dari integrasi Upstash di Vercel (`KV_REST_API_URL`/`KV_REST_API_TOKEN` atau `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`; keduanya dibaca).
+- Rewrite `vercel.json` (`/api/:path+` → `/api?path=:path+`) dan export `GET`/`POST` di fungsi tanpa framework. `routeOf()` menerima path langsung maupun `?path=`, untuk berjaga-jaga.
+- Apakah `waitUntil` benar-benar menjaga slice tetap jalan sampai selesai setelah respons dikirim.
+- Apakah situs sumber berbahasa Indonesia bisa dibuka dari IP Vercel (verifier).

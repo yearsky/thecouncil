@@ -5,21 +5,36 @@ import { EMPTY_TOKENS, addTokens } from '../agents/usage.js'
 import { aliasOrder, assignAliases } from './anonymize.js'
 import { ClaimRegistry, countByStatus } from './claims.js'
 import { accepts, isReached, tally } from './consensus.js'
+import { memoryBlock } from './memory.js'
 import { MODERATOR_SYSTEM, PANELIST_SYSTEM, framePrompt, judgePrompt, panelPrompt, repairPrompt, votePrompt } from './prompts.js'
 import { extractJson, validateFrame, validateJudge, validatePanelist, validateVoteOnly } from './schema.js'
 
+// Sinyal "jeda" dari runner cloud (src/cloud/runner.js): sidang dilanjutkan di pemanggilan fungsi berikutnya.
+// Bukan kegagalan, jadi tidak boleh dicatat sebagai agen gagal atau peringatan.
+export const isYield = (err) => Boolean(err?.isYield)
+
 // Minta jawaban JSON; kalau tidak valid, minta perbaikan satu kali (tanpa web search, hanya merapikan format).
 // effort/repairEffort hanya dipakai agen yang mendukungnya (Claude Code CLI); agen lain mengabaikannya.
+// elapsedMs dari jawaban (jurnal cloud) dipakai kalau ada, supaya durasi asli tidak hilang saat diputar ulang.
 export async function askJson(agent, { system, prompt, model, webSearch = false, effort, repairEffort }, validate) {
   const calls = []
   async function call(text, web, repair) {
     const start = Date.now()
     try {
       const res = await agent.ask({ system, prompt: text, model, webSearch: web, effort: (repair ? repairEffort : effort) || undefined })
-      calls.push({ agent: agent.id, repair, ms: Date.now() - start, costUsd: res.costUsd, tokens: res.tokens || null, model: res.meta?.model })
+      calls.push({
+        agent: agent.id,
+        repair,
+        ms: res.elapsedMs ?? Date.now() - start,
+        costUsd: res.costUsd,
+        tokens: res.tokens || null,
+        model: res.meta?.model,
+        ...(res.meta?.stopReason === 'max_tokens' ? { truncated: true } : {})
+      })
       return res
     } catch (err) {
-      calls.push({ agent: agent.id, repair, ms: Date.now() - start, failed: true })
+      if (isYield(err)) throw err
+      calls.push({ agent: agent.id, repair, ms: err.elapsedMs ?? Date.now() - start, failed: true })
       err.calls = calls
       throw err
     }
@@ -39,6 +54,9 @@ export async function askJson(agent, { system, prompt, model, webSearch = false,
   }
 }
 
+// Penulis klaim yang berasal dari memori sidang sebelumnya.
+export const MEMORY_AGENT = 'memori'
+
 function createUsage() {
   const blank = () => ({ calls: 0, failedCalls: 0, ms: 0, costUsd: 0, tokens: { ...EMPTY_TOKENS }, measured: 0 })
   const usage = { ...blank(), byRole: {}, byStage: {} }
@@ -48,6 +66,7 @@ function createUsage() {
       for (const bucket of [usage, sum, (usage.byRole[role] ||= blank()), (usage.byStage[c.repair ? 'repair' : stage] ||= blank())]) {
         bucket.calls++
         if (c.failed) bucket.failedCalls++
+        if (c.truncated) bucket.truncated = (bucket.truncated || 0) + 1
         bucket.ms += c.ms
         if (typeof c.costUsd === 'number') bucket.costUsd += c.costUsd
         if (c.tokens) {
@@ -72,19 +91,32 @@ export async function runCouncil({
   devilsAdvocate = true,
   effort = {},
   verify = null,
+  memory = [],
   random = Math.random,
   emit = () => {},
   clock = () => new Date(),
+  startedAt: startedAtOverride,
   finalize
 }) {
   const send = (event) => emit({ ts: clock().toISOString(), ...event })
   const panelIds = panel.map((a) => a.id)
   const aliases = assignAliases(panelIds, random)
-  const aliasOf = (id) => aliases[id] || id
+  const aliasOf = (id) => (id === MEMORY_AGENT ? 'sidang sebelumnya' : aliases[id] || id)
   const registry = new ClaimRegistry()
   const { usage, track } = createUsage()
   const flags = []
-  const startedAt = clock()
+  const startedAt = startedAtOverride ? new Date(startedAtOverride) : clock()
+
+  // Klaim ✅ dari memori masuk daftar klaim lebih dulu (ronde 0), lengkap dengan hasil verifikasinya.
+  const memoryIds = {}
+  for (const m of memory) {
+    memoryIds[m.id] = m.claims.map((c) => {
+      const entry = registry.add(c, { agent: MEMORY_AGENT, round: 0 })
+      registry.setVerification([[entry.id, c.verification]])
+      return entry.id
+    })
+  }
+  const memoryText = memoryBlock(memory, memoryIds)
   const moderatorInfo = { id: moderator.agent.id, label: moderator.agent.label, model: moderator.model || moderator.agent.model || null }
   send({
     type: 'session_started',
@@ -94,7 +126,13 @@ export async function runCouncil({
     maxRounds,
     consensus,
     web,
-    verify: Boolean(verify)
+    verify: Boolean(verify),
+    ...(memory.length
+      ? {
+          memory: memory.map((m) => ({ id: m.id, question: m.question, claims: memoryIds[m.id].length })),
+          memoryClaims: registry.list().map((c) => ({ id: c.id, text: c.text, kind: c.kind, source_url: c.source_url, quote: c.quote, verification: c.verification }))
+        }
+      : {})
   })
 
   const askModerator = async (prompt, validate, stage) => {
@@ -103,7 +141,7 @@ export async function runCouncil({
       track(r.calls, { role: 'moderator', stage })
       return r.value
     } catch (err) {
-      track(err.calls, { role: 'moderator', stage })
+      if (!isYield(err)) track(err.calls, { role: 'moderator', stage })
       throw err
     }
   }
@@ -111,8 +149,9 @@ export async function runCouncil({
   // FRAME
   let frame
   try {
-    frame = await askModerator(framePrompt(topic), validateFrame, 'frame')
+    frame = await askModerator(framePrompt(topic, memoryText), validateFrame, 'frame')
   } catch (err) {
+    if (isYield(err)) throw err
     frame = { question: topic, criteria: [], context: '' }
     send({ type: 'warning', stage: 'frame', message: `Moderator gagal merumuskan pertanyaan (${err.message}); topik dipakai apa adanya.` })
   }
@@ -144,6 +183,7 @@ export async function runCouncil({
         claims: pending.map((c) => ({ id: c.id, status: c.verification?.status, detail: c.verification?.detail, source_url: c.source_url }))
       })
     } catch (err) {
+      if (isYield(err)) throw err
       send({ type: 'warning', stage: 'verify', round, message: `Verifikasi sumber gagal (${err.message}).` })
     }
   }
@@ -161,9 +201,10 @@ export async function runCouncil({
         const claims = registry.list()
         const prompt =
           mode === 'vote'
-            ? votePrompt({ frame, draft, alias: aliasOf(agent.id), previousVote: previousVotes?.[agent.id], claims, aliasOf })
+            ? votePrompt({ frame, memoryText, draft, alias: aliasOf(agent.id), previousVote: previousVotes?.[agent.id], claims, aliasOf })
             : panelPrompt({
                 frame,
+                memoryText,
                 round,
                 alias: aliasOf(agent.id),
                 draft,
@@ -182,12 +223,13 @@ export async function runCouncil({
           const r = await askJson(agent, { system: PANELIST_SYSTEM, prompt, webSearch: useWeb, effort: effort[stage], repairEffort: effort.repair }, validate)
           const spent = track(r.calls, { role: agent.id, stage })
           const response = mode === 'vote' ? r.value : register(agent.id, round, r.value)
-          const ms = Date.now() - start
+          const ms = r.calls.reduce((sum, c) => sum + c.ms, 0)
           send({ type: 'agent_finished', round, agent: agent.id, ms, repaired: r.repaired, usage: { calls: spent.calls, tokens: spent.tokens, costUsd: spent.costUsd }, response })
           return [agent.id, { ok: true, ms, repaired: r.repaired, response }]
         } catch (err) {
+          if (isYield(err)) throw err
           track(err.calls, { role: agent.id, stage: mode === 'vote' ? 'vote' : 'panel' })
-          const ms = Date.now() - start
+          const ms = err.calls ? err.calls.reduce((sum, c) => sum + c.ms, 0) : Date.now() - start
           send({ type: 'agent_failed', round, agent: agent.id, ms, error: err.message })
           return [agent.id, { ok: false, ms, error: err.message }]
         }
@@ -263,6 +305,7 @@ export async function runCouncil({
       judged = await askModerator(
         judgePrompt({
           frame,
+          memoryText,
           round,
           previousDraft: draft,
           responses: ok.map((a) => ({ label: aliasOf(a.id), response: results[a.id].response })),
@@ -277,6 +320,7 @@ export async function runCouncil({
       entry.judged = judged
       send({ type: 'judged', round, ...judged })
     } catch (err) {
+      if (isYield(err)) throw err
       send({ type: 'warning', stage: 'judge', round, message: `Moderator gagal merangkum ronde ${round} (${err.message}).` })
       if (!draft) {
         status = 'error'
@@ -311,6 +355,7 @@ export async function runCouncil({
     panel: panel.map((a) => ({ id: a.id, label: a.label, model: a.model || null, alias: aliases[a.id] })),
     moderator: moderatorInfo,
     aliases,
+    memory: memory.map((m) => ({ id: m.id, question: m.question, status: m.status, claims: memoryIds[m.id] })),
     rounds,
     decided,
     final: finalJudged ? { ...finalJudged } : null,
