@@ -153,6 +153,18 @@ test('council run end-to-end lewat CLI dengan Claude palsu (--json)', async (t) 
   assert.match(fs.readFileSync(last.report, 'utf8'), /Draft kesimpulan ronde 1/)
   const saved = fs.readFileSync(path.join(path.dirname(last.report), 'events.jsonl'), 'utf8').trim().split('\n')
   assert.equal(saved.length, events.length)
+  const memory = JSON.parse(fs.readFileSync(path.join(path.dirname(last.report), 'memory.json'), 'utf8'))
+  assert.equal(memory.claims.length, 1)
+
+  // --lanjut: kesimpulan + klaim ✅ sidang tadi ikut ke sidang baru.
+  const sessionId = path.basename(path.dirname(last.report))
+  const next = await run(['Lanjutkan: rencana MVP', '--json', '--rounds', '2', '--lanjut', sessionId])
+  assert.equal(next.status, 0, next.stderr)
+  const nevents = next.stdout.trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(nevents[0].memory, [{ id: sessionId, question: memory.question, claims: 1 }])
+  const missing = await run(['x', '--lanjut', 'folder-yang-tidak-ada'])
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /--lanjut: folder sesi "folder-yang-tidak-ada" tidak ditemukan/)
 
   const disagree = await run(['Ide hackathon', '--json', '--rounds', '1', '--model', 'haiku=sonnet', '--no-verify'], { FAKE_CLAUDE_MODE: 'disagree' })
   assert.equal(disagree.status, 0, disagree.stderr)

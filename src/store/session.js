@@ -2,6 +2,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { memoryFromEvents } from '../council/memory.js'
 
 export function slugify(text, max = 40) {
   const slug = String(text)
@@ -36,6 +37,25 @@ export function createSession({ topic, baseDir = 'sessions', now = new Date() })
     },
     writeReport(markdown) {
       fs.writeFileSync(reportPath, markdown)
+    },
+    writeMemory(memory) {
+      fs.writeFileSync(path.join(dir, 'memory.json'), JSON.stringify(memory, null, 2))
     }
   }
+}
+
+// Memori sidang lama untuk --lanjut: memory.json kalau ada, kalau tidak disusun dari events.jsonl.
+export function readMemory(sessionDir, { baseDir = 'sessions' } = {}) {
+  const candidates = [path.resolve(sessionDir), path.resolve(baseDir, sessionDir)]
+  const dir = candidates.find((d) => fs.existsSync(path.join(d, 'events.jsonl')) || fs.existsSync(path.join(d, 'memory.json')))
+  if (!dir) throw new Error(`folder sesi "${sessionDir}" tidak ditemukan (dicari juga di ${baseDir}/)`)
+  const id = path.basename(dir)
+  const memoryPath = path.join(dir, 'memory.json')
+  if (fs.existsSync(memoryPath)) return JSON.parse(fs.readFileSync(memoryPath, 'utf8'))
+  const events = fs
+    .readFileSync(path.join(dir, 'events.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+  return memoryFromEvents(events, { id })
 }

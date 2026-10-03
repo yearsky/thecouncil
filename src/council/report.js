@@ -77,6 +77,10 @@ export function buildReport(result) {
   out.push(`| Aturan konsensus | ${result.consensus === 'majority' ? 'mayoritas' : 'bulat'} |`)
   out.push(`| Web search | ${result.web ? 'aktif untuk agen yang mendukung' : 'mati'} |`)
   out.push(`| Verifikasi sumber | ${result.verify ? 'aktif (oleh program)' : 'mati'} |`)
+  if (result.memory?.length) {
+    const list = result.memory.map((m) => `${m.id} (${m.question}; klaim ✅: ${m.claims.length ? m.claims.join(', ') : 'tidak ada'})`)
+    out.push(`| Melanjutkan sidang | ${cell(list.join('\n'))} |`)
+  }
   out.push(`| Waktu | ${formatTime(result.startedAt)}, sekitar ${minutes} menit |`, '')
 
   if (result.frame.criteria.length || result.frame.context) {
@@ -133,7 +137,9 @@ export function buildReport(result) {
     out.push('| ID | Klaim | Jenis | Sumber | Verifikasi | Oleh |', '|---|---|---|---|---|---|')
     for (const c of claims) {
       const source = c.source_url ? `${c.source_url}${c.quote ? `<br>"${c.quote}"` : ''}` : '–'
-      out.push(`| ${c.id} | ${cell(c.text)} | ${c.kind} | ${cell(source)} | ${cell(verificationCell(c))} | ${cell(`${c.by.map((id) => labelOf[id] || id).join(', ')}; ronde ${c.rounds.join(', ')}`)} |`)
+      const by = c.by.map((id) => (id === 'memori' ? 'memori sidang sebelumnya' : labelOf[id] || id)).join(', ')
+      const rounds = c.rounds.filter((r) => r > 0)
+      out.push(`| ${c.id} | ${cell(c.text)} | ${c.kind} | ${cell(source)} | ${cell(verificationCell(c))} | ${cell(rounds.length ? `${by}; ronde ${rounds.join(', ')}` : by)} |`)
     }
     out.push('')
   }
@@ -181,7 +187,8 @@ function usageSection(result, labelOf) {
   const u = result.usage
   const out = ['## Pemakaian', '']
   out.push(`- Panggilan AI: ${u.calls}${u.failedCalls ? ` (${u.failedCalls} gagal)` : ''}; total durasi panggilan ${Math.round(u.ms / 1000)} dtk (sebagian berjalan paralel)`)
-  if (u.costUsd) out.push(`- \`total_cost_usd\` menurut Claude Code: $${u.costUsd.toFixed(4)}. Ini estimasi sisi klien, bukan tagihan.`)
+  if (u.costUsd) out.push(`- Estimasi biaya: $${u.costUsd.toFixed(4)} (Claude Code: \`total_cost_usd\`; agen API: dari "pricing" di config). Ini estimasi sisi klien, bukan tagihan.`)
+  if (u.truncated) out.push(`- ⚠️ ${u.truncated} jawaban berhenti di batas \`maxTokens\` dan mungkin terpotong. Naikkan \`maxTokens\` agen di config.`)
   if (u.measured) {
     out.push(`- Token terukur untuk ${u.measured} dari ${u.calls} panggilan (Codex CLI belum melaporkan token).`, '')
     const row = (name, b) =>

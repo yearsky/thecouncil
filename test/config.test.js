@@ -17,7 +17,7 @@ test('mergeConfig menimpa per field tanpa menghapus bawaan', () => {
   const c = mergeConfig(DEFAULT_CONFIG, { moderator: { model: 'opus' }, agents: { deepseek: { model: 'x' } } })
   assert.deepEqual(c.moderator, { agent: 'claude', model: 'opus' })
   assert.equal(c.agents.deepseek.model, 'x')
-  assert.equal(c.agents.deepseek.baseURL, 'https://api.deepseek.com')
+  assert.equal(c.agents.deepseek.baseURL, 'https://api.deepseek.com/anthropic')
   assert.equal(c.agents.claude.model, 'sonnet')
 })
 

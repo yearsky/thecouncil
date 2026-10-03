@@ -1,0 +1,45 @@
+{
+  "moderator": {
+    "agent": "deepseek-pro",
+    "model": ""
+  },
+  "panel": [
+    "deepseek-pro",
+    "deepseek-flash",
+    "deepseek-flash-b"
+  ],
+  "maxRounds": 3,
+  "consensus": "unanimous",
+  "agents": {
+    "deepseek-pro": {
+      "type": "anthropic-compatible",
+      "label": "DeepSeek Pro",
+      "baseURL": "https://api.deepseek.com/anthropic",
+      "modelsURL": "https://api.deepseek.com",
+      "model": "",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "timeoutMs": 180000,
+      "maxTokens": 32000
+    },
+    "deepseek-flash": {
+      "type": "anthropic-compatible",
+      "label": "DeepSeek Flash",
+      "baseURL": "https://api.deepseek.com/anthropic",
+      "modelsURL": "https://api.deepseek.com",
+      "model": "",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "timeoutMs": 180000,
+      "maxTokens": 32000
+    },
+    "deepseek-flash-b": {
+      "type": "anthropic-compatible",
+      "label": "DeepSeek Flash (B)",
+      "baseURL": "https://api.deepseek.com/anthropic",
+      "modelsURL": "https://api.deepseek.com",
+      "model": "",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "timeoutMs": 180000,
+      "maxTokens": 32000
+    }
+  }
+}

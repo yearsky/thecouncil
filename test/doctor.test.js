@@ -19,7 +19,7 @@ async function setup(t, overrides = {}) {
   const fakes = {
     claude: { bin: fakeBin('fake-claude.js') },
     codex: { bin: fakeBin('fake-codex.js') },
-    deepseek: { baseURL: api.url, apiKeyEnv: 'TEST_DS_KEY', model: 'fake-pro' }
+    deepseek: { baseURL: `${api.url}/anthropic`, modelsURL: api.url, apiKeyEnv: 'TEST_DS_KEY', model: 'fake-pro' }
   }
   const agents = {}
   for (const id of Object.keys(fakes)) agents[id] = { ...fakes[id], ...overrides.agents?.[id] }
@@ -59,7 +59,8 @@ test('doctor: semua agen siap', async (t) => {
 
   const deepseek = byId(report, 'deepseek')
   assert.equal(check(deepseek, 'model').detail, 'fake-pro')
-  assert.equal(check(deepseek, 'web search').status, 'skip')
+  assert.equal(check(deepseek, 'web search').status, 'ok')
+  assert.match(check(deepseek, 'web search').detail, /\/source → HTTP 200/)
 
   const text = formatDoctor(report, { style: plain, source: 'council.config.json' })
   assert.match(text, /✔ Claude \(claude-cli\)/)
@@ -71,7 +72,7 @@ test('doctor --quick tidak memanggil AI', async (t) => {
   const report = await runDoctor(config, { quick: true })
   assert.equal(report.ok, true)
   assert.deepEqual(byId(report, 'claude').checks.map((c) => c.name), ['terpasang'])
-  assert.ok(!api.requests.some((q) => q.url === '/chat/completions'))
+  assert.ok(!api.requests.some((q) => q.url === '/chat/completions' || q.url === '/anthropic/v1/messages'))
 })
 
 test('doctor: CLI tidak ada, belum login, dan API key kosong dilaporkan gagal', async (t) => {

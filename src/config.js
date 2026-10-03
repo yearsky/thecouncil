@@ -25,13 +25,17 @@ export const DEFAULT_CONFIG = {
   agents: {
     claude: { type: 'claude-cli', bin: 'claude', model: 'sonnet', timeoutMs: 300000, extraArgs: [] },
     codex: { type: 'codex-cli', bin: 'codex', model: '', timeoutMs: 300000, webSearchArgs: ['-c', 'web_search=live'], extraArgs: [] },
+    // Endpoint format Anthropic, karena hanya endpoint ini yang punya web search di sisi server.
+    // Kalau bermasalah, ganti "type" ke "openai-compatible" dan "baseURL" ke https://api.deepseek.com (tanpa web search).
     deepseek: {
-      type: 'openai-compatible',
+      type: 'anthropic-compatible',
       label: 'DeepSeek',
-      baseURL: 'https://api.deepseek.com',
+      baseURL: 'https://api.deepseek.com/anthropic',
+      modelsURL: 'https://api.deepseek.com',
       model: '',
       apiKeyEnv: 'DEEPSEEK_API_KEY',
-      timeoutMs: 180000
+      timeoutMs: 180000,
+      maxTokens: 32000
     }
   }
 }

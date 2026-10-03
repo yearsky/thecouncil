@@ -1,16 +1,20 @@
 {
   "name": "thecouncil",
   "version": "0.1.0",
-  "description": "Sidang debat beberapa agen AI (Claude Code CLI, Codex CLI, DeepSeek API) dari terminal Windows",
+  "description": "Sidang debat beberapa agen AI (Claude Code CLI, Codex CLI, DeepSeek API): terminal, UI web lokal, atau Vercel",
   "type": "module",
   "bin": {
     "council": "src/index.js"
   },
   "scripts": {
     "doctor": "node src/index.js doctor",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "ui": "node src/index.js ui"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.9.11"
   }
 }
