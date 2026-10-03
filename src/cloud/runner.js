@@ -21,6 +21,14 @@ import { mulberry32, newSeed } from './seed.js'
 export const runKey = (id, part) => `run:${id}:${part}`
 export const memoryKey = (id) => `memory:${id}`
 
+// Slot "satu sidang berjalan": nilainya "<id>|<waktu klaim ms>" (lihat claimSlot di src/cloud/app.js).
+export const ACTIVE_KEY = 'active'
+export function parseActive(value) {
+  if (!value) return null
+  const [id, at] = String(value).split('|')
+  return { id, at: Number(at) || 0 }
+}
+
 // ID tetap per kejadian. Saat sidang diputar ulang, event yang sama punya ID yang sama dan tidak disimpan lagi.
 // Urutan event dari panggilan paralel bisa berbeda saat diputar ulang, jadi nomor urut tidak bisa dipakai.
 export function eventId(e) {
@@ -98,8 +106,9 @@ export async function runSlice(
     const agents = Object.fromEntries(Object.entries(makeAgents(config)).map(([id, agent]) => [id, replay.agent(agent)]))
 
     let outcome
+    let crashed = false
     try {
-      await runCouncil({
+      const result = await runCouncil({
         topic: meta.topic,
         panel: config.panel.map((id) => agents[id]),
         moderator: { agent: agents[config.moderator.agent], model: config.moderator.model || undefined },
@@ -116,15 +125,22 @@ export async function runSlice(
         emit,
         finalize: async (result) => {
           await kv.set(runKey(runId, 'report'), buildReport(result))
-          await kv.set(memoryKey(runId), JSON.stringify(memoryFromResult(result, { id: runId })))
+          // Sidang gagal tidak punya kesimpulan yang layak dilanjutkan.
+          if (result.status !== 'error') await kv.set(memoryKey(runId), JSON.stringify(memoryFromResult(result, { id: runId })))
           return { run: runId }
         }
       })
-      outcome = 'finished'
+      // Protokol bisa selesai normal dengan status "error" (mis. semua panelis gagal). Sama seperti CLI,
+      // itu kegagalan; peringatannya sudah ada di event sidang, jadi tidak perlu event tambahan.
+      if (result.status === 'error') {
+        outcome = 'error'
+        meta.error = 'Sidang berhenti tanpa kesimpulan; lihat peringatan di jalannya sidang.'
+      } else outcome = 'finished'
     } catch (err) {
       if (err.isYield) outcome = err.cancelled ? 'cancelled' : 'paused'
       else {
         outcome = 'error'
+        crashed = true
         meta.error = err.message
       }
     }
@@ -134,17 +150,18 @@ export async function runSlice(
     await new Promise((resolve) => setImmediate(resolve))
     if (writeErrors.length && outcome !== 'finished') {
       outcome = 'error'
+      crashed = true
       meta.error = `jurnal gagal disimpan: ${writeErrors[0]}`
     }
     const ts = new Date(now()).toISOString()
     if (outcome === 'cancelled') emit({ type: 'cancelled', ts, message: 'Sidang dibatalkan.' })
-    if (outcome === 'error') emit({ type: 'warning', ts, stage: 'run', message: `Sidang berhenti karena error: ${meta.error}` })
+    if (crashed) emit({ type: 'warning', ts, stage: 'run', message: `Sidang berhenti karena error: ${meta.error}` })
     await saving
 
     if (outcome !== 'paused') {
       meta.status = outcome
       meta.finishedAt = ts
-      if ((await kv.get('active')) === runId) await kv.del('active')
+      if (parseActive(await kv.get(ACTIVE_KEY))?.id === runId) await kv.del(ACTIVE_KEY)
     }
     await writeMeta(kv, meta)
     return { state: outcome, events: appended }

@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp, routeOf } from '../src/cloud/app.js'
 import { CLOUD_CONFIG, cloudConfig, runConfigErrors } from '../src/cloud/config.js'
-import { readMeta } from '../src/cloud/runner.js'
+import { parseActive, readMeta } from '../src/cloud/runner.js'
 import { mergeConfig, DEFAULT_CONFIG } from '../src/config.js'
 import { startServer } from '../src/server.js'
 import { memoryKv } from '../src/store/kv.js'
@@ -254,4 +254,50 @@ test('batas waktu agen: dipotong ke callTimeoutMs di server, apa adanya tanpa ba
     await app.handle(new Request('https://x.test/api/models'))
   }
   assert.deepEqual(seen, [{ p: 180000, q: 180000 }, { p: 600000, q: undefined }])
+})
+
+test('slot satu sidang diklaim atomik: dua POST bersamaan, hanya satu yang jalan; slot basi bisa dipakai lagi', async () => {
+  const { call, settle, kv } = setup()
+  const cookie = await login(call)
+  const post = (topic) => call('POST', 'runs', { cookie, body: { topic } })
+  const [a, b] = await Promise.all([post('pertama'), post('kedua')])
+  assert.deepEqual([a.status, b.status].sort(), [201, 409])
+  const winner = (a.status === 201 ? a : b).data.run.id
+  assert.equal(parseActive(await kv.get('active')).id, winner)
+  assert.equal((await call('GET', 'runs', { cookie })).data.runs.length, 1)
+  await settle()
+
+  // Pemegang slot yang sudah berhenti (mis. sidang selesai tapi slot tidak sempat dilepas) tidak menghalangi.
+  await kv.set('active', `${winner}|${Date.now()}`)
+  const next = await post('ketiga')
+  assert.equal(next.status, 201, JSON.stringify(next.data))
+  assert.equal(parseActive(await kv.get('active')).id, next.data.run.id)
+  // Pemegang yang meta-nya belum ada: dianggap sedang dibuat kalau baru diklaim, basi kalau sudah lama.
+  await settle()
+  await kv.set('active', `sedang-dibuat|${Date.now()}`)
+  assert.equal((await post('keempat')).status, 409)
+  await kv.set('active', `macet|${Date.now() - 10 * 60000}`)
+  assert.equal((await post('kelima')).status, 201)
+  await settle()
+  assert.equal(await kv.get('active'), null)
+
+  // Kuota habis: slot dilepas lagi, jadi tidak tertahan.
+  const limited = setup({ limits: { dailyRuns: 0 } })
+  const c2 = await login(limited.call)
+  assert.equal((await limited.call('POST', 'runs', { cookie: c2, body: { topic: 'x' } })).status, 429)
+  assert.equal(await limited.kv.get('active'), null)
+})
+
+test('sidang gagal tampil sebagai error dan tidak bisa dilanjutkan', async () => {
+  const { call, settle } = setup({ script: { PANEL: new Error('HTTP 500 dari penyedia') } })
+  const cookie = await login(call)
+  const { data } = await call('POST', 'runs', { cookie, body: { topic: 'Gagal' } })
+  await settle()
+  const run = (await call('GET', `runs/${data.run.id}/events/0`, { cookie })).data.run
+  assert.equal(run.status, 'error')
+  assert.match(run.error, /tanpa kesimpulan/)
+  assert.deepEqual((await call('GET', 'memories', { cookie })).data.runs, [])
+  const cont = await call('POST', 'runs', { cookie, body: { topic: 'Lanjut', memory: [data.run.id] } })
+  assert.equal(cont.status, 400)
+  assert.match(cont.data.error, /tidak ada/)
 })

@@ -303,3 +303,22 @@ test('upstashKv mengirim perintah Redis sebagai array JSON dengan token', async 
   assert.deepEqual(upstashEnv({ UPSTASH_REDIS_REST_URL: 'u2', UPSTASH_REDIS_REST_TOKEN: 't2' }), { url: 'u2', token: 't2' })
   assert.equal(upstashEnv({}), null)
 })
+
+test('sidang yang gagal di protokol (semua panelis gagal) dicatat error, tanpa memori', async () => {
+  const kv = memoryKv()
+  const makeAgents = () =>
+    Object.fromEntries(['a', 'b', 'c'].map((id) => [id, scriptedAgent(id, { PANEL: new Error('HTTP 500 dari penyedia') })]))
+  await createRun(kv, { id: 'gagal', topic: 'Topik uji', config: CONFIG, seed: 1 })
+  await kv.set('active', 'gagal|1')
+  const r = await runSlice(kv, 'gagal', { makeAgents, makeVerifier: () => async () => new Map() })
+  assert.equal(r.state, 'error')
+  const meta = await readMeta(kv, 'gagal')
+  assert.equal(meta.status, 'error')
+  assert.match(meta.error, /tanpa kesimpulan/)
+  assert.equal(await readMemory(kv, 'gagal'), null)
+  assert.ok(await kv.get(runKey('gagal', 'report')), 'laporan tetap disimpan')
+  const events = await readEvents(kv, 'gagal')
+  assert.equal(events.at(-1).type, 'finished')
+  assert.equal(events.at(-1).status, 'error')
+  assert.equal(await kv.get('active'), null)
+})

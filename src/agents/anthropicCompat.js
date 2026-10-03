@@ -53,8 +53,15 @@ export function createAnthropicCompatAgent({
   const apiKey = () => process.env[apiKeyEnv] || ''
   const lister = createOpenAiCompatAgent({ id, label, baseURL: modelsURL, apiKeyEnv, timeoutMs })
 
-  async function post(body, t) {
+  // Satu batas waktu untuk seluruh `ask` (termasuk lanjutan pause_turn dan fallback tanpa web search),
+  // supaya satu panggilan tidak pernah lebih lama dari timeout-nya. Ini penting di Vercel: runner hanya
+  // menyisakan waktu untuk satu panggilan penuh (src/cloud/app.js).
+  const timeoutError = (t) => new Error(`${label} tidak merespons dalam ${Math.round(t / 1000)} detik`)
+
+  async function post(body, { deadline, t }) {
     if (!apiKey()) throw new Error(`${apiKeyEnv} belum diisi di .env`)
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw timeoutError(t)
     let res
     try {
       res = await fetch(`${base}/v1/messages`, {
@@ -67,13 +74,19 @@ export function createAnthropicCompatAgent({
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(t)
+        signal: AbortSignal.timeout(remaining)
       })
     } catch (err) {
-      if (err.name === 'TimeoutError') throw new Error(`${label} tidak merespons dalam ${Math.round(t / 1000)} detik`)
+      if (err.name === 'TimeoutError') throw timeoutError(t)
       throw new Error(`${label} tidak bisa dihubungi (${base}): ${err.cause?.code || err.message}`)
     }
-    const text = await res.text()
+    let text
+    try {
+      text = await res.text()
+    } catch (err) {
+      if (err.name === 'TimeoutError') throw timeoutError(t)
+      throw err
+    }
     let data = null
     try {
       data = JSON.parse(text)
@@ -88,7 +101,7 @@ export function createAnthropicCompatAgent({
     return data
   }
 
-  async function converse({ system, prompt, model: useModel, tools, t }) {
+  async function converse({ system, prompt, model: useModel, tools, limit }) {
     const messages = [{ role: 'user', content: prompt }]
     let tokens = { ...EMPTY_TOKENS }
     let webSearchRequests = 0
@@ -96,7 +109,7 @@ export function createAnthropicCompatAgent({
     let data
     // "pause_turn": giliran server dijeda (mis. pencarian panjang); kirim balik apa adanya untuk dilanjutkan.
     for (let i = 0; i <= maxContinuations; i++) {
-      data = await post({ ...extraBody, model: useModel, max_tokens: maxTokens, ...(system ? { system } : {}), messages, ...(tools ? { tools } : {}) }, t)
+      data = await post({ ...extraBody, model: useModel, max_tokens: maxTokens, ...(system ? { system } : {}), messages, ...(tools ? { tools } : {}) }, limit)
       tokens = addTokens(tokens, fromAnthropicUsage(data?.usage))
       webSearchRequests += data?.usage?.server_tool_use?.web_search_requests ?? 0
       content.push(...(data?.content || []))
@@ -119,15 +132,16 @@ export function createAnthropicCompatAgent({
       const useModel = modelOverride || model
       if (!useModel) throw new Error(`Model ${label} belum diisi di config`)
       const tools = webSearch ? [{ type: SEARCH_TOOL, name: 'web_search', ...(maxSearchUses ? { max_uses: maxSearchUses } : {}) }] : null
+      const limit = { deadline: Date.now() + t, t }
       let result
       let searchFallback = null
       try {
-        result = await converse({ system, prompt, model: useModel, tools, t })
+        result = await converse({ system, prompt, model: useModel, tools, limit })
       } catch (err) {
         // Kalau endpoint menolak tool web search (4xx), coba sekali tanpa tool dan catat alasannya.
         if (!tools || !(err.status >= 400 && err.status < 500) || err.status === 401 || err.status === 402 || err.status === 429) throw err
         searchFallback = err.message
-        result = await converse({ system, prompt, model: useModel, tools: null, t })
+        result = await converse({ system, prompt, model: useModel, tools: null, limit })
       }
       const read = readContent(result.content)
       const stopReason = result.data?.stop_reason || null
