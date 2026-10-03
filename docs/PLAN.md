@@ -308,10 +308,13 @@ Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: me
 
 **Alternatif sejak Fase 3: lewat API di Vercel** (§18), kalau semua agen DeepSeek. Bot tidak perlu menjalankan apa pun selain HTTP:
 
-- `POST /api/runs` dengan header `Authorization: Bearer <COUNCIL_API_TOKEN>` dan body `{"topic": "...", "models": {...}}`.
-- Panggil `GET /api/runs/<id>/events/<n>` berkala. Setiap panggilan sekaligus melanjutkan sidang yang dijeda (K9), jadi bot yang menunggu hasil juga yang menggerakkan sidang.
-- Hasil akhir ada di event `finished`; laporan lengkap di `GET /api/runs/<id>/report`.
-- Batal: `POST /api/runs/<id>/cancel`.
+Rute dikirim lewat query `?path=`, karena di Vercel rewrite `/api/<rute>` tidak sampai ke fungsi (§18).
+
+- `POST /api?path=runs` dengan header `Authorization: Bearer <COUNCIL_API_TOKEN>` dan body `{"topic": "...", "models": {...}}`.
+- Panggil `GET /api?path=runs/<id>/events/<n>` berkala. Setiap panggilan sekaligus melanjutkan sidang yang dijeda (K9), jadi bot yang menunggu hasil juga yang menggerakkan sidang.
+- Hasil akhir ada di event `finished`; laporan lengkap di `GET /api?path=runs/<id>/report`.
+- Batal: `POST /api?path=runs/<id>/cancel`.
+- Project Vercel memakai Vercel Authentication untuk URL `.vercel.app`, jadi bot juga butuh *Protection Bypass for Automation* (header `x-vercel-protection-bypass`) **[cek]**.
 
 ## 12. Keamanan
 
@@ -608,6 +611,12 @@ Kalau semua panelis DeepSeek, kesalahannya cenderung sama, jadi debat kurang ind
 
 - Semua perilaku API DeepSeek asli (nama model, web search, format usage, header).
 - Nama env dari integrasi Upstash di Vercel (`KV_REST_API_URL`/`KV_REST_API_TOKEN` atau `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`; keduanya dibaca).
-- Rewrite `vercel.json` (`/api/:path+` → `/api?path=:path+`) dan export `GET`/`POST` di fungsi tanpa framework. `routeOf()` menerima path langsung maupun `?path=`, untuk berjaga-jaga.
+- ~~Rewrite `vercel.json` (`/api/:path+` → `/api?path=:path+`)~~ **Terbukti tidak cukup** (3 Okt 2026, deploy pertama). Fungsi `api/index.js` jalan, tapi tidak menerima rutenya, sehingga login dengan password benar dijawab "belum login".
+  - Sejak itu UI dan bot memanggil `/api?path=<rute>` langsung, tanpa bergantung pada rewrite.
+  - Rute yang tidak dikenal dijawab 404 dengan URL yang diterima fungsi, bukan "belum login".
+  - `GET /api?path=health` menampilkan rute yang terbaca.
+  - Bentuk URL persis yang diterima fungsi saat rewrite belum diketahui, karena log Vercel tidak bisa dibaca dari lingkunganku.
+- Export `GET`/`POST` di fungsi tanpa framework: terbukti jalan (fungsi menjawab di deploy pertama).
+- Project Vercel baru ternyata memakai Vercel Authentication untuk semua URL `.vercel.app`, termasuk produksi (`ssoProtection: all_except_custom_domains`). Jadi butuh login Vercel di browser, dan bot butuh bypass. Ini berbeda dari dugaan awal di §12.
 - Apakah `waitUntil` benar-benar menjaga slice tetap jalan sampai selesai setelah respons dikirim.
 - Apakah situs sumber berbahasa Indonesia bisa dibuka dari IP Vercel (verifier).

@@ -101,7 +101,7 @@ test('fungsi Vercel: login, sidang DeepSeek dengan web search sampai selesai, la
     return { status: res.status, data: type.includes('json') ? await res.json() : await res.text() }
   }
 
-  assert.deepEqual((await call('GET', 'health')).data, { ok: true, kv: 'upstash', auth: true })
+  assert.deepEqual((await call('GET', 'health')).data, { ok: true, kv: 'upstash', auth: true, route: 'health' })
   assert.equal((await call('POST', 'login', { password: 'rahasia' })).status, 200)
   assert.deepEqual((await call('GET', 'models')).data.models, ['fake-flash', 'fake-pro'])
   const missing = await call('POST', 'runs', { topic: 'x' })

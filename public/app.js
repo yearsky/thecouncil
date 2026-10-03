@@ -136,8 +136,11 @@ function md(source) {
 
 // ---------- API ----------
 
+// Rute dikirim lewat ?path= (bukan /api/<rute>), karena di Vercel rewrite /api/<rute> tidak sampai ke fungsi.
+const apiUrl = (path) => `/api?path=${encodeURIComponent(path)}`
+
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(`/api/${path}`, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -497,7 +500,7 @@ function createRunView(id) {
             el(
               'div',
               { class: 'row' },
-              el('a', { href: `/api/runs/${encodeURIComponent(id)}/report`, download: `${id}.md` }, el('button', { type: 'button', class: 'secondary' }, 'Unduh laporan (.md)')),
+              el('a', { href: apiUrl(`runs/${id}/report`), download: `${id}.md` }, el('button', { type: 'button', class: 'secondary' }, 'Unduh laporan (.md)')),
               el('a', { href: `#/baru?lanjut=${encodeURIComponent(id)}` }, el('button', { type: 'button' }, 'Lanjutkan sidang ini'))
             )
           )
