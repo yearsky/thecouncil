@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mergeConfig, DEFAULT_CONFIG } from '../src/config.js'
 import { checkUrl, extractUrls, formatDoctor, runDoctor } from '../src/doctor.js'
 import { createStyle } from '../src/ui/style.js'
-import { fakeBin, startFakeApi } from './helpers.js'
+import { fakeBin, startFakeApi, startFakeScholar } from './helpers.js'
 
 const plain = createStyle(false)
 
@@ -23,7 +23,9 @@ async function setup(t, overrides = {}) {
   }
   const agents = {}
   for (const id of Object.keys(fakes)) agents[id] = { ...fakes[id], ...overrides.agents?.[id] }
-  return { api, config: mergeConfig(DEFAULT_CONFIG, { ...overrides, agents }) }
+  const scholar = await startFakeScholar()
+  t.after(scholar.close)
+  return { api, scholar, config: mergeConfig(DEFAULT_CONFIG, { research: { baseURLs: scholar.baseURLs }, ...overrides, agents }) }
 }
 
 const byId = (report, id) => report.results.find((r) => r.id === id)
@@ -62,8 +64,17 @@ test('doctor: semua agen siap', async (t) => {
   assert.equal(check(deepseek, 'web search').status, 'ok')
   assert.match(check(deepseek, 'web search').detail, /\/source → HTTP 200/)
 
+  // Literatur: Semantic Scholar dan OpenAlex palsu memberi hasil, arXiv palsu kosong (peringatan, bukan gagal).
+  assert.equal(report.literature.status, 'warn')
+  assert.deepEqual(
+    report.literature.checks.map((c) => [c.name, c.status]),
+    [['Semantic Scholar', 'ok'], ['OpenAlex', 'ok'], ['arXiv', 'warn']]
+  )
+  assert.match(report.literature.checks[1].detail, /^1 hasil · .* · tanpa OPENALEX_API_KEY \(opsional\)$/)
+
   const text = formatDoctor(report, { style: plain, source: 'council.config.json' })
   assert.match(text, /✔ Claude \(claude-cli\)/)
+  assert.match(text, /⚠ Riset literatur \(indeks ilmiah\)\n  ✔ Semantic Scholar/)
   assert.match(text, /Hasil: 3 siap\./)
 })
 
@@ -71,6 +82,8 @@ test('doctor --quick tidak memanggil AI', async (t) => {
   const { api, config } = await setup(t)
   const report = await runDoctor(config, { quick: true })
   assert.equal(report.ok, true)
+  assert.ok(report.literature, 'literatur tidak memakai kuota AI, jadi ikut di --quick')
+  assert.equal((await runDoctor({ ...config, research: { enabled: false } }, { quick: true })).literature, undefined)
   assert.deepEqual(byId(report, 'claude').checks.map((c) => c.name), ['terpasang'])
   assert.ok(!api.requests.some((q) => q.url === '/chat/completions' || q.url === '/anthropic/v1/messages'))
 })

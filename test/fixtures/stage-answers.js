@@ -9,11 +9,33 @@ export function stageAnswer(stage, input, { model = 'fake', disagree = false, so
   const vote = { on_draft: disagree ? 'DISAGREE' : 'AGREE', reservations: [], blocking_objections: disagree ? ['belum ada data'] : [] }
   switch (stage) {
     case 'FRAME':
-      return { question: 'Ide hackathon apa yang paling layak?', criteria: ['bisa dibuat 48 jam', 'ada data masalahnya'], context: '' }
+      return {
+        question: 'Ide hackathon apa yang paling layak?',
+        criteria: ['bisa dibuat 48 jam', 'ada data masalahnya', 'tidak klise'],
+        context: '',
+        obvious: ['chatbot WhatsApp untuk UMKM', 'pembukuan dari foto struk'],
+        queries: ['smallholder credit scoring', 'kredit petani kecil']
+      }
+    case 'RESEARCH': {
+      // Kutip abstrak sumber S1 kalau ada di prompt (paper palsu dari server literatur uji).
+      const hasPaper = /^S1 · /m.test(input)
+      return {
+        insights: [
+          { finding: 'Indeks vegetasi satelit memprediksi pembayaran kredit petani', sources: hasPaper ? ['S1'] : ['C1'], why_non_obvious: 'data bank tidak dipakai', implication: 'skor kredit tanpa riwayat', open_question: 'akurasi di Indonesia' },
+          { finding: 'Versi Node yang stabil sudah tersedia', sources: ['C1'] }
+        ],
+        gaps: ['belum ada data panen per desa'],
+        why_now: ['citra satelit gratis beresolusi tinggi'],
+        claims: [
+          { id: 'C1', text: 'Node.js 24 adalah LTS', kind: 'fact', source_url: source, quote: 'Node.js 24 adalah versi LTS' },
+          ...(hasPaper ? [{ id: 'C2', text: 'Indeks vegetasi memprediksi pembayaran', kind: 'fact', source_url: 'S1', quote: 'satellite vegetation indices predict repayment' }] : [])
+        ]
+      }
+    }
     case 'PANEL':
       return {
         position: `Posisi ${model} di ronde ${round}`,
-        proposals: [{ id: 'P1', title: 'Aplikasi pencatat keuangan UMKM', why: 'banyak UMKM belum mencatat' }],
+        proposals: [{ id: 'P1', title: 'Skor kredit petani dari citra satelit', why: 'petani tanpa riwayat kredit', basis: ['I1'], non_obvious: 'bank belum memakai data satelit', why_now: 'citra gratis' }],
         claims: [{ id: 'C1', text: 'Node.js 24 adalah LTS', kind: 'fact', source_url: source, quote: 'Node.js 24 adalah versi LTS' }],
         ...(round > 1 ? { critiques: [], changed_mind: { changed: false }, vote } : {})
       }

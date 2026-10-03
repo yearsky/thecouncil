@@ -291,6 +291,11 @@ Catatan:
   - `session_started` mendapat `memory` (sidang yang dilanjutkan) dan `memoryClaims` (klaim ✅ yang dibawa), hanya kalau ada memori.
   - Event baru `cancelled` (mode server).
   - Di mode server, setiap event yang disimpan mendapat `seq` (nomor urut) dan `id` (tetap per kejadian, mis. `agent_finished:2:deepseek-pro:`). `finished` membawa `run` (ID sidang) sebagai ganti `session`/`report`.
+- Riset (§19):
+  - `session_started` mendapat `research` (boolean), dan `panel[].lens` kalau lensa aktif.
+  - `framed` mendapat `obvious` (jawaban klise) dan `queries` (kata kunci riset).
+  - Event baru: `literature` (`queries`, `papers`, `stats`, `errors`) dan `researched` (`insights`, `gaps`, `why_now`, `claims`, `usage`, `search`). `verified` dengan `round: 0` berisi klaim dari tahap riset.
+  - `agent_finished` mendapat `search` (`requests`, `urls`, `results`) kalau agen diberi web search.
 - Semua event juga disimpan di `sessions/<id>/events.jsonl`.
 
 Ini kontrak antar-repo, jadi perubahannya harus tetap kompatibel ke belakang: menambah field boleh, mengganti nama field jangan.
@@ -620,3 +625,55 @@ Kalau semua panelis DeepSeek, kesalahannya cenderung sama, jadi debat kurang ind
 - Project Vercel baru ternyata memakai Vercel Authentication untuk semua URL `.vercel.app`, termasuk produksi (`ssoProtection: all_except_custom_domains`). Jadi butuh login Vercel di browser, dan bot butuh bypass. Ini berbeda dari dugaan awal di §12.
 - Apakah `waitUntil` benar-benar menjaga slice tetap jalan sampai selesai setelah respons dikirim.
 - Apakah situs sumber berbahasa Indonesia bisa dibuka dari IP Vercel (verifier).
+
+## 19. Tahap riset dan anti-ide klise
+
+### Kenapa
+
+Sidang DeepSeek pertama (3 Okt 2026, topik hackathon + bisnis) menghasilkan ide yang sangat umum: dua panelis memilih chatbot WhatsApp untuk UMKM, satu memilih pembukuan dari foto struk. Dugaan penyebabnya dari membaca kode, belum diukur:
+
+1. Tidak ada tahap riset. Panelis menjawab dari ingatan model, lalu memakai web search (maks. 3) untuk membenarkan klaim, bukan untuk menemukan.
+2. Panel satu keluarga model (§18): ronde blind tidak menghasilkan sudut pandang berbeda, dan konsensus cepat tercapai pada ide yang paling umum.
+3. Tidak ada penalti untuk ide klise. Kriteria kelayakan (demo 48 jam, pelanggan pertama) justru menguntungkan ide sederhana. Prompt contoh yang meminta 5 ide × 3 kalimat juga melebar, bukan mendalam.
+4. Tidak terlihat apakah panelis benar-benar mencari: `webSearchRequests` tercatat di agen tapi tidak dikirim ke event.
+
+### Yang diterapkan
+
+- **FRAME** juga menulis `obvious` (5–8 jawaban klise) dan `queries` (kata kunci riset). Daftar klise masuk bagian statis prompt semua tahap.
+- **Literatur (program, `src/evidence/scholar.js`):**
+  - Sumber: Semantic Scholar Graph API, OpenAlex, dan arXiv. Hasilnya di-dedupe (DOI/judul) dan diberi peringkat (sering muncul, punya abstrak, baru, sitasi). Disimpan maks. 12 sumber S1…S12, abstrak dipotong ±1.500 karakter.
+  - Jeda antar-permintaan: S2 ±1,1 dtk, arXiv 3 dtk (pedoman arXiv), maks. 3 query untuk arXiv. Sumber yang dibatasi (429), ditolak, atau timeout dihentikan dan dicatat sebagai satu peringatan.
+  - Di cloud, hasilnya dijurnal (`replay.task`), jadi slice berikutnya memakai hasil yang sama.
+- **Peneliti (AI, model moderator, `researchPrompt`):**
+  - Membaca abstrak, lalu mencari laporan industri, regulasi, data terbuka, dan thesis/skripsi di web (batas sendiri: `research.searchBudget`, bawaan 6).
+  - Hasilnya 6–10 insight `{finding, sources, why_non_obvious, implication, open_question}`, plus `gaps` dan `why_now`.
+  - Klaim baru masuk daftar klaim dan diverifikasi sebelum ronde 1 (`verified` ronde 0).
+  - Kalau peneliti gagal, debat tetap jalan; daftar literatur tetap dipakai kalau ada.
+- **Verifikasi kutipan paper:** `source_url` berupa "S3" dipetakan ke URL paper. Kutipan dicek ke judul + abstrak yang diambil program. Kalau tidak cocok persis, halamannya tetap dicek verifier biasa.
+- **Lensa panelis** (`lenses`): peneliti, orang dalam industri, dan investor kontrarian, dibagi menurut urutan alias (dari seed, jadi deterministik saat replay).
+- **Aturan baru:**
+  - Usulan menyebut `basis` (I/S/K), `non_obvious`, dan `why_now`.
+  - Web search diarahkan untuk menemukan.
+  - Moderator menilai kebaruan dan mencatat draft yang condong ke jawaban klise sebagai perbedaan pendapat.
+  - Devil's advocate menguji "klise dengan nama baru".
+- **Transparansi:**
+  - `agent_finished.search` dan `researched.search` berisi jumlah pencarian yang dilaporkan penyedia dan URL hasilnya.
+  - UI menampilkan "🔎 N pencarian", tab **Riset** (klise, insight, sumber), dan langkah "Riset literatur" di stepper.
+  - `doctor` menguji tiap sumber literatur.
+- **Memori sidang** membawa insight yang bersumber (literatur atau klaim ✅), dengan judul/URL sebagai ganti nomor S/K.
+
+### Biaya dan batas
+
+- Tambahan per sidang: 1 panggilan AI peneliti (dengan web search) dan 5–15 permintaan ke indeks ilmiah (gratis).
+- Berkas literatur dan insight (perkiraan 4–7 ribu token) ikut di bagian statis setiap prompt, jadi token input naik. Bagian ini identik antar-ronde, jadi bisa memanfaatkan cache prefix penyedia; apakah DeepSeek benar-benar meng-cache-nya belum aku ukur.
+- Panggilan peneliti tunduk pada batas 180 dtk per panggilan di Vercel. Kalau habis waktu, riset dicatat gagal.
+- PDF belum dibaca, termasuk thesis PDF.
+- Aku tidak menemukan API resmi Garuda atau repositori thesis kampus yang bisa kupastikan, jadi thesis dicari lewat web search peneliti. Peneliti diarahkan ke halaman repositori HTML supaya kutipannya bisa dicek.
+
+### Yang belum diverifikasi
+
+- Semua API literatur asli: dari lingkungan pengembangan, Semantic Scholar, OpenAlex, Crossref, dan Garuda diblokir egress, dan arXiv menjawab 403. Format diambil dari dokumentasi; uji memakai server palsu. Cek dari Vercel lewat **Cek agen** (`/api?path=doctor/quick`).
+- Kebijakan key OpenAlex 2026 (key gratis, kuota harian; tanpa key kuota kecil) diambil dari ringkasan pencarian, bukan dari dokumentasinya langsung.
+- Apakah DeepSeek benar-benar memakai web search saat diminta. Docs DeepSeek menyebut pencarian dilakukan kalau model menilai perlu. Angka "🔎" sekarang menunjukkannya per jawaban.
+- Apakah semua ini membuat ide benar-benar lebih tajam. Belum ada pengukuran; perlu dibandingkan dengan sidang 3 Okt 2026 pada topik yang sama.
+- Opsi berikutnya: panelis dari penyedia lain (keragaman model sungguhan), membaca PDF, dan mode "thinking" DeepSeek (belum diketahui apakah didukung di endpoint Anthropic).

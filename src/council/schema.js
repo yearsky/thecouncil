@@ -40,20 +40,19 @@ export function normalizeVote(vote) {
   }
 }
 
+// "obvious" (jawaban klise yang harus dilampaui) dan "queries" (kata kunci riset) opsional: jawaban lama tanpa
+// field ini tetap valid.
 export function validateFrame(obj) {
   const question = str(obj.question)
   if (!question) throw new Error('"question" kosong')
-  return { question, criteria: strList(obj.criteria), context: str(obj.context) }
+  return { question, criteria: strList(obj.criteria), context: str(obj.context), obvious: strList(obj.obvious).slice(0, 10), queries: strList(obj.queries).slice(0, 8) }
 }
 
-export function validatePanelist(obj, { expectVote = false } = {}) {
-  const position = str(obj.position)
-  if (!position) throw new Error('"position" kosong')
-  const proposals = list(obj.proposals)
-    .map((p) => (typeof p === 'string' ? { title: p.trim(), why: '' } : { id: str(p?.id), title: str(p?.title), why: str(p?.why) }))
-    .filter((p) => p.title)
-    .map((p, i) => ({ id: p.id || `P${i + 1}`, title: p.title, why: p.why }))
-  const claims = list(obj.claims)
+// Rujukan ke insight (I1), sumber literatur (S1), atau klaim (K1).
+const refList = (v) => [...new Set(strList(v).map((id) => id.toUpperCase()))].filter((id) => /^[ISKC]\d+$/.test(id))
+
+function parseClaims(value) {
+  return list(value)
     .map((c) => (typeof c === 'string' ? { text: c.trim() } : c || {}))
     .map((c) => {
       const kind = str(c.kind).toLowerCase()
@@ -61,6 +60,23 @@ export function validatePanelist(obj, { expectVote = false } = {}) {
     })
     .filter((c) => c.text)
     .map((c, i) => ({ ...c, id: c.id || `C${i + 1}` }))
+}
+
+export function validatePanelist(obj, { expectVote = false } = {}) {
+  const position = str(obj.position)
+  if (!position) throw new Error('"position" kosong')
+  const proposals = list(obj.proposals)
+    .map((p) => (typeof p === 'string' ? { title: p.trim(), why: '' } : { ...p, id: str(p?.id), title: str(p?.title), why: str(p?.why) }))
+    .filter((p) => p.title)
+    .map((p, i) => {
+      const out = { id: p.id || `P${i + 1}`, title: p.title, why: p.why }
+      const basis = refList(p.basis)
+      if (basis.length) out.basis = basis
+      if (str(p.non_obvious)) out.non_obvious = str(p.non_obvious)
+      if (str(p.why_now)) out.why_now = str(p.why_now)
+      return out
+    })
+  const claims = parseClaims(obj.claims)
   const critiques = list(obj.critiques)
     .map((c) => (typeof c === 'string' ? { target: '', point: c.trim(), severity: 'minor' } : { target: str(c?.target), point: str(c?.point), severity: str(c?.severity).toLowerCase() === 'blocking' ? 'blocking' : 'minor' }))
     .filter((c) => c.point)
@@ -88,6 +104,23 @@ export function validateJudge(obj) {
     draft,
     next_focus: str(obj.next_focus)
   }
+}
+
+// Hasil tahap riset. Insight diberi nomor ulang I1, I2, … supaya ID-nya pasti urut dan unik.
+export function validateResearch(obj) {
+  const insights = list(obj.insights)
+    .map((x) => (typeof x === 'string' ? { finding: x } : x || {}))
+    .map((x) => ({
+      finding: str(x.finding),
+      sources: refList(x.sources),
+      why_non_obvious: str(x.why_non_obvious),
+      implication: str(x.implication),
+      open_question: str(x.open_question)
+    }))
+    .filter((x) => x.finding)
+    .map((x, i) => ({ id: `I${i + 1}`, ...x }))
+  if (!insights.length) throw new Error('"insights" kosong')
+  return { insights, gaps: strList(obj.gaps), why_now: strList(obj.why_now), claims: parseClaims(obj.claims) }
 }
 
 export function validateVoteOnly(obj) {

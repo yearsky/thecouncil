@@ -29,11 +29,24 @@ const DEFAULT_SCRIPT = {
     claims: [{ text: `klaim ${id}`, kind: 'fact', source_url: `https://${id}.test/a`, quote: 'q' }],
     ...(round > 1 ? { vote: { on_draft: 'AGREE' } } : {})
   }),
+  RESEARCH: {
+    insights: [
+      { finding: 'temuan dari paper', sources: ['S1'], why_non_obvious: 'jarang dibahas', implication: 'peluang', open_question: '' },
+      { finding: 'temuan dari web', sources: ['C1'] }
+    ],
+    gaps: ['celah'],
+    why_now: ['regulasi baru'],
+    claims: [
+      { id: 'C1', text: 'klaim riset web', kind: 'fact', source_url: 'https://riset.test/a', quote: 'q' },
+      { id: 'C2', text: 'klaim dari abstrak', kind: 'fact', source_url: 'S1', quote: 'satellite vegetation indices predict repayment' }
+    ]
+  },
   JUDGE: ({ round }) => ({ summary: `ringkas r${round}`, agreements: ['a'], disagreements: [], draft: `draft r${round}`, next_focus: `fokus r${round}` }),
   VOTE: { vote: { on_draft: 'AGREE' } }
 }
 
-export function scriptedAgent(id, script = {}, { webSearch = false } = {}) {
+// `searches`: jumlah pencarian yang dilaporkan agen saat diberi web search (meta seperti agen API).
+export function scriptedAgent(id, script = {}, { webSearch = false, searches = null } = {}) {
   const calls = []
   return {
     id,
@@ -49,7 +62,8 @@ export function scriptedAgent(id, script = {}, { webSearch = false } = {}) {
       const value = typeof handler === 'function' ? await handler({ id, round, req, n: calls.length }) : handler
       if (value instanceof Error) throw value
       if (value === undefined) throw new Error(`tahap ${stage} tidak ditangani`)
-      return { text: typeof value === 'string' ? value : JSON.stringify(value), costUsd: 0.01, tokens: { input: 100, cacheRead: 20, cacheWrite: 0, output: 10 } }
+      const meta = searches !== null && req.webSearch ? { webSearchRequests: searches, searchUrls: Array.from({ length: searches }, (_, i) => `https://${id}.cari/${i + 1}`) } : undefined
+      return { text: typeof value === 'string' ? value : JSON.stringify(value), costUsd: 0.01, tokens: { input: 100, cacheRead: 20, cacheWrite: 0, output: 10 }, ...(meta ? { meta } : {}) }
     }
   }
 }
@@ -122,4 +136,51 @@ export async function startFakeApi({ models = ['fake-flash', 'fake-pro'], apiKey
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   url = `http://127.0.0.1:${server.address().port}`
   return { url, requests, close: () => new Promise((resolve) => server.close(resolve)) }
+}
+
+// Paper palsu untuk uji tahap riset. Abstraknya memuat kutipan yang dipakai jawaban RESEARCH di atas.
+export const FAKE_PAPER = {
+  id: 'S1',
+  source: 'semanticscholar',
+  title: 'Credit scoring for smallholder farmers using satellite data',
+  year: 2024,
+  venue: 'World Development',
+  authors: ['Sari Dewi'],
+  citations: 40,
+  doi: '10.1000/abc.1',
+  url: 'https://doi.org/10.1000/abc.1',
+  altUrls: ['https://www.semanticscholar.org/paper/a1'],
+  abstract: 'Smallholder farmers lack formal credit histories. We show satellite vegetation indices predict repayment.',
+  tldr: '',
+  foundIn: ['semanticscholar'],
+  queries: ['q']
+}
+
+// Server yang meniru Semantic Scholar, OpenAlex, dan arXiv (satu paper yang sama di ketiganya).
+export async function startFakeScholar() {
+  const requests = []
+  const server = http.createServer((req, res) => {
+    requests.push(req.url)
+    if (req.url.startsWith('/graph/v1/paper/search')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(
+        JSON.stringify({
+          data: [{ title: FAKE_PAPER.title, year: 2024, venue: 'World Development', citationCount: 40, externalIds: { DOI: '10.1000/abc.1' }, url: FAKE_PAPER.altUrls[0], abstract: FAKE_PAPER.abstract, authors: [{ name: 'Sari Dewi' }] }]
+        })
+      )
+    }
+    if (req.url.startsWith('/works')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ results: [{ id: 'https://openalex.org/W9', doi: null, display_name: 'Cold chain losses in Indonesian fisheries', publication_year: 2025, cited_by_count: 3, abstract_inverted_index: { Post: [0], harvest: [1], losses: [2] } }] }))
+    }
+    if (req.url.startsWith('/api/query')) {
+      res.writeHead(200, { 'Content-Type': 'application/atom+xml' })
+      return res.end('<feed></feed>')
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const url = `http://127.0.0.1:${server.address().port}`
+  return { url, requests, baseURLs: { semanticscholar: url, openalex: url, arxiv: url }, close: () => new Promise((resolve) => server.close(resolve)) }
 }

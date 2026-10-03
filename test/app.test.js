@@ -11,7 +11,7 @@ import { parseActive, readMeta } from '../src/cloud/runner.js'
 import { mergeConfig, DEFAULT_CONFIG } from '../src/config.js'
 import { startServer } from '../src/server.js'
 import { memoryKv } from '../src/store/kv.js'
-import { scriptedAgent } from './helpers.js'
+import { FAKE_PAPER, scriptedAgent } from './helpers.js'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -42,6 +42,8 @@ function setup({ env = { COUNCIL_PASSWORD: 'rahasia', COUNCIL_API_TOKEN: 'tok-bo
     waitUntil: (p) => tasks.push(p),
     makeAgents,
     makeVerifier: () => async (pending) => new Map(pending.map((c) => [c.id, { status: 'verified', detail: 'uji' }])),
+    // Tanpa jaringan: pencarian literatur palsu.
+    makeLiterature: () => async () => ({ papers: [FAKE_PAPER], errors: [], stats: {} }),
     limits,
     log: { error: (m) => logs.push(m) },
     ...opts
@@ -167,6 +169,10 @@ test('sidang lewat API: validasi, berjalan sampai selesai, laporan, memori, dan 
   const meta = await readMeta(kv, id)
   assert.equal(meta.config.consensus, 'majority')
   assert.equal(meta.config.web, false)
+  // Tahap riset aktif bawaan: literatur (palsu) lalu hasil riset, sebelum ronde 1.
+  const types = all.data.events.map((e) => e.type)
+  assert.ok(types.indexOf('literature') > types.indexOf('framed') && types.indexOf('researched') < types.indexOf('round_started'))
+  assert.equal(meta.config.research.enabled, true)
 
   const report = await call('GET', `runs/${id}/report`, { cookie })
   assert.equal(report.status, 200)
@@ -177,8 +183,10 @@ test('sidang lewat API: validasi, berjalan sampai selesai, laporan, memori, dan 
 
   const memories = await call('GET', 'memories', { cookie })
   assert.deepEqual(memories.data.runs.map((r) => r.id), [id])
-  const next = await post({ topic: 'Lanjutan', memory: [id] })
+  const next = await post({ topic: 'Lanjutan', memory: [id], research: false })
   assert.equal(next.status, 201)
+  assert.equal((await readMeta(kv, next.data.run.id)).config.research.enabled, false)
+  assert.equal(CONFIG.research.enabled, true, 'config server tidak ikut berubah')
   assert.deepEqual(next.data.run.memory.map((m) => m.id), [id])
   await settle()
   assert.equal((await post({ topic: 'ketiga' })).status, 429)
@@ -222,6 +230,7 @@ test('model, doctor, dan rute tidak dikenal', async () => {
   const cfg = (await call('GET', 'config', { cookie })).data
   assert.deepEqual(cfg.panel.map((a) => [a.id, a.label, a.model]), [['p', 'DS Pro', 'm-pro'], ['q', 'DS Flash', 'm-flash']])
   assert.equal(cfg.moderator.id, 'p')
+  assert.equal(cfg.defaults.research, true)
   await call('GET', 'doctor/quick', { cookie })
   await call('GET', 'doctor', { cookie })
   assert.deepEqual(doctorCalls, [true, false])

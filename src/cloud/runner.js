@@ -13,6 +13,7 @@ import { createAgents } from '../agents/index.js'
 import { memoryFromResult } from '../council/memory.js'
 import { runCouncil } from '../council/protocol.js'
 import { buildReport } from '../council/report.js'
+import { literatureSearcher } from '../evidence/scholar.js'
 import { createVerifier } from '../evidence/verify.js'
 import { slugify, stamp } from '../store/session.js'
 import { createGate, createReplay, kvJournal } from './journal.js'
@@ -69,7 +70,15 @@ export async function createRun(kv, { topic, config, memory = [], now = new Date
 export async function runSlice(
   kv,
   runId,
-  { makeAgents = (config) => createAgents(config), makeVerifier = () => createVerifier(), startWindowMs = Infinity, lockTtlSec = 330, now = Date.now, onEvent } = {}
+  {
+    makeAgents = (config) => createAgents(config),
+    makeVerifier = () => createVerifier(),
+    makeLiterature = (research) => literatureSearcher(research),
+    startWindowMs = Infinity,
+    lockTtlSec = 330,
+    now = Date.now,
+    onEvent
+  } = {}
 ) {
   const token = crypto.randomUUID()
   if (!(await kv.set(runKey(runId, 'lock'), token, { nx: true, ex: lockTtlSec }))) return { state: 'busy', events: [] }
@@ -117,6 +126,10 @@ export async function runSlice(
         web: config.web,
         searchBudget: config.searchBudget,
         devilsAdvocate: config.devilsAdvocate,
+        lenses: config.lenses,
+        research: config.research?.enabled ? config.research : null,
+        // Hasil pencarian literatur dijurnal: slice berikutnya memakai hasil yang sama tanpa memanggil API lagi.
+        literatureSearch: config.research?.enabled ? replay.task('literature', makeLiterature(config.research)) : null,
         effort: config.effort,
         verify: config.verify ? replay.verifier(makeVerifier()) : null,
         memory: meta.memory || [],

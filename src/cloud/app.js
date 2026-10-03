@@ -104,6 +104,7 @@ export function createApp({
   limits: limitOverrides = {},
   makeAgents,
   makeVerifier = () => createVerifier(),
+  makeLiterature,
   doctor = runDoctor,
   now = () => new Date(),
   log = console
@@ -123,7 +124,7 @@ export function createApp({
   function kick(id) {
     const end = deadline()?.getTime()
     const window = end ? Math.max(10000, end - Date.now() - limits.callTimeoutMs - limits.marginMs) : startWindowMs
-    const task = runSlice(kv, id, { makeAgents: agentsFor, makeVerifier, startWindowMs: window, lockTtlSec }).catch((err) => log.error(`[council] slice ${id} gagal: ${err.message}`))
+    const task = runSlice(kv, id, { makeAgents: agentsFor, makeVerifier, ...(makeLiterature ? { makeLiterature } : {}), startWindowMs: window, lockTtlSec }).catch((err) => log.error(`[council] slice ${id} gagal: ${err.message}`))
     waitUntil(task)
     return task
   }
@@ -164,7 +165,7 @@ export function createApp({
     if (!topic) throw new HttpError(400, 'topik sidang kosong')
     if (topic.length > limits.maxTopicChars) throw new HttpError(400, `topik terlalu panjang (maks. ${limits.maxTopicChars} karakter)`)
 
-    const cfg = { ...config, moderator: { ...config.moderator }, agents: { ...config.agents } }
+    const cfg = { ...config, moderator: { ...config.moderator }, research: { ...config.research }, agents: { ...config.agents } }
     if (input.maxRounds !== undefined) {
       const n = Number(input.maxRounds)
       if (!Number.isInteger(n) || n < 1 || n > 10) throw new HttpError(400, 'jumlah ronde harus 1–10')
@@ -176,6 +177,7 @@ export function createApp({
     }
     if (input.web !== undefined) cfg.web = Boolean(input.web)
     if (input.verify !== undefined) cfg.verify = Boolean(input.verify)
+    if (input.research !== undefined) cfg.research.enabled = Boolean(input.research)
     for (const [id, model] of Object.entries(input.models || {})) {
       if (!cfg.panel.includes(id) && cfg.moderator.agent !== id) throw new HttpError(400, `agen "${id}" tidak ada di panel`)
       cfg.agents[id] = { ...cfg.agents[id], model: String(model) }
@@ -272,7 +274,14 @@ export function createApp({
       return json(200, {
         panel: config.panel.map(agent),
         moderator: { ...agent(config.moderator.agent), model: config.moderator.model || '' },
-        defaults: { maxRounds: config.maxRounds, consensus: config.consensus, web: config.web, verify: config.verify, searchBudget: config.searchBudget },
+        defaults: {
+          maxRounds: config.maxRounds,
+          consensus: config.consensus,
+          web: config.web,
+          verify: config.verify,
+          research: Boolean(config.research?.enabled),
+          searchBudget: config.searchBudget
+        },
         limits: { dailyRuns: limits.dailyRuns, maxTopicChars: limits.maxTopicChars }
       })
     }

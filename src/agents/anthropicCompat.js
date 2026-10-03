@@ -128,10 +128,12 @@ export function createAnthropicCompatAgent({
     apiKeyEnv,
     hasKey: () => Boolean(apiKey()),
     listModels: () => lister.listModels(),
-    async ask({ system, prompt, model: modelOverride, webSearch = false, timeoutMs: t = timeoutMs } = {}) {
+    // searchUses: batas pencarian khusus panggilan ini (mis. tahap riset), menggantikan maxSearchUses.
+    async ask({ system, prompt, model: modelOverride, webSearch = false, searchUses, timeoutMs: t = timeoutMs } = {}) {
       const useModel = modelOverride || model
       if (!useModel) throw new Error(`Model ${label} belum diisi di config`)
-      const tools = webSearch ? [{ type: SEARCH_TOOL, name: 'web_search', ...(maxSearchUses ? { max_uses: maxSearchUses } : {}) }] : null
+      const uses = searchUses ?? maxSearchUses
+      const tools = webSearch ? [{ type: SEARCH_TOOL, name: 'web_search', ...(uses ? { max_uses: uses } : {}) }] : null
       const limit = { deadline: Date.now() + t, t }
       let result
       let searchFallback = null

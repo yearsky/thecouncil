@@ -7,7 +7,7 @@ import { memoryBlock, memoryFromEvents, memoryFromResult } from '../src/council/
 import { runCouncil } from '../src/council/protocol.js'
 import { buildReport } from '../src/council/report.js'
 import { createSession, readMemory } from '../src/store/session.js'
-import { scriptedAgent } from './helpers.js'
+import { FAKE_PAPER, scriptedAgent } from './helpers.js'
 
 const IDENTITY = () => 0.999999
 
@@ -106,4 +106,25 @@ test('readMemory (--lanjut): memory.json, atau disusun dari events.jsonl, atau e
   session.writeMemory({ ...memoryFromResult(result, { id: session.id }), summary: 'dari memory.json' })
   assert.equal(readMemory(session.dir).summary, 'dari memory.json')
   assert.throws(() => readMemory('tidak-ada', { baseDir: base }), /tidak ditemukan/)
+})
+
+test('memori membawa insight riset yang bersumber, dengan judul/URL sebagai ganti nomor S dan K', async () => {
+  const events = []
+  const a = scriptedAgent('a')
+  const result = await runCouncil({
+    topic: 'Ide',
+    panel: [a],
+    moderator: { agent: a, model: 'mod' },
+    maxRounds: 1,
+    random: IDENTITY,
+    emit: (e) => events.push(e),
+    research: { enabled: true },
+    literatureSearch: async () => ({ papers: [FAKE_PAPER], errors: [], stats: {} }),
+    verify: async (pending) => new Map(pending.map((c) => [c.id, { status: c.source_url === 'https://riset.test/a' ? 'unverifiable' : 'verified', detail: 'uji' }]))
+  })
+  const fromResult = memoryFromResult(result, { id: 'x' })
+  // I1 bersumber S1 (paper); I2 bersumber klaim web yang ❔, jadi tidak dibawa.
+  assert.deepEqual(fromResult.insights, [{ finding: 'temuan dari paper', sources: ['Credit scoring for smallholder farmers using satellite data (2024)'] }])
+  assert.deepEqual(memoryFromEvents(events, { id: 'x' }).insights, fromResult.insights)
+  assert.match(memoryBlock([fromResult]), /Temuan riset sidang ini \(dengan sumbernya\):\n- temuan dari paper \(sumber: Credit scoring/)
 })

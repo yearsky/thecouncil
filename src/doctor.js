@@ -2,6 +2,7 @@
 // Urutan per agen: terpasang / API key → uji dasar → web search. Agen diperiksa paralel.
 
 import { agentIdsInUse, createAgent } from './agents/index.js'
+import { SCHOLAR_SOURCES, searchLiterature } from './evidence/scholar.js'
 import { createStyle } from './ui/style.js'
 
 export const DOCTOR_SYSTEM =
@@ -140,7 +141,28 @@ function summarize(agent, checks) {
   return { id: agent.id, label: agent.label, type: agent.type, status, checks }
 }
 
-export async function runDoctor(config, { quick = false, web = true, only, makeAgent = createAgent } = {}) {
+// Sumber literatur tahap riset: satu pencarian kecil per sumber (tanpa AI, jadi juga ikut di --quick).
+// Tidak pernah "fail": tanpa literatur, sidang tetap jalan dan peneliti hanya memakai web.
+export async function checkLiterature(research = {}, { env = process.env, fetchImpl } = {}) {
+  const checks = await Promise.all(
+    (research.sources || Object.keys(SCHOLAR_SOURCES)).map(async (name) => {
+      const src = SCHOLAR_SOURCES[name]
+      if (!src) return { name, status: 'warn', detail: 'sumber tidak dikenal' }
+      const key = src.keyEnv ? (env[src.keyEnv] ? ` · ${src.keyEnv} terisi` : ` · tanpa ${src.keyEnv} (opsional)`) : ''
+      const { value: r, ms } = await timed(() =>
+        searchLiterature(['smallholder farmer credit scoring'], { sources: [name], perQuery: 2, keep: 2, baseURLs: research.baseURLs, gaps: { [name]: 0 }, env, fetchImpl })
+      )
+      if (r.errors.length) return { name: src.label, status: 'warn', detail: `${r.errors[0].message}${key}` }
+      const found = r.stats[name]?.results || 0
+      return { name: src.label, status: found ? 'ok' : 'warn', detail: `${found ? `${found} hasil` : 'tidak ada hasil'} · ${secs(ms)}${key}` }
+    })
+  )
+  const status = checks.every((c) => c.status === 'ok') ? 'ok' : 'warn'
+  return { id: 'literatur', label: 'Riset literatur', type: 'indeks ilmiah', status, checks }
+}
+
+export async function runDoctor(config, { quick = false, web = true, only, makeAgent = createAgent, literature = checkLiterature } = {}) {
+  const lit = !only && config.research?.enabled && literature ? literature(config.research) : null
   const ids = only ? [only] : agentIdsInUse(config)
   const results = await Promise.all(
     ids.map(async (id) => {
@@ -159,7 +181,7 @@ export async function runDoctor(config, { quick = false, web = true, only, makeA
       return checkAgent(agent, { quick, web, moderatorModel })
     })
   )
-  return { ok: results.every((r) => r.status !== 'fail'), results }
+  return { ok: results.every((r) => r.status !== 'fail'), results, ...(lit ? { literature: await lit } : {}) }
 }
 
 // "info" dan "skip" tidak memengaruhi status agen.
@@ -168,7 +190,7 @@ const ICON = { ok: '✔', warn: '⚠', fail: '✖', skip: '–', info: '•' }
 export function formatDoctor(report, { style = createStyle(), source } = {}) {
   const paint = { ok: style.green, warn: style.yellow, fail: style.red, skip: style.dim, info: style.cyan }
   const lines = [style.bold('The Council — doctor'), style.dim(`Config: ${source || 'bawaan (council.config.json belum ada)'}`), '']
-  for (const r of report.results) {
+  for (const r of [...report.results, ...(report.literature ? [report.literature] : [])]) {
     lines.push(`${paint[r.status](ICON[r.status])} ${style.bold(r.label)} ${style.dim(`(${r.type})`)}`)
     const width = Math.max(...r.checks.map((c) => c.name.length))
     for (const c of r.checks) {

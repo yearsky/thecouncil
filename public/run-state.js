@@ -1,9 +1,9 @@
 // Model halaman sidang, dibangun dari event sidang (docs/PLAN.md §10). Tanpa DOM, supaya bisa diuji dengan
 // node --test. run-view.js merender model ini; tahap aktif dan stepper diturunkan dari sini, bukan ditebak di UI.
 //
-// Urutan sidang (src/council/protocol.js): rumuskan pertanyaan → untuk tiap ronde: jawaban panelis → cek sumber
-// (kalau ada klaim baru) → [ronde kritik: hitung suara, berhenti kalau sudah sepakat] → rangkuman moderator →
-// … → suara akhir (kalau batas ronde habis tanpa kesepakatan) → hasil.
+// Urutan sidang (src/council/protocol.js): rumuskan pertanyaan → [riset: literatur + peneliti + cek sumber] →
+// untuk tiap ronde: jawaban panelis → cek sumber (kalau ada klaim baru) → [ronde kritik: hitung suara, berhenti
+// kalau sudah sepakat] → rangkuman moderator → … → suara akhir (kalau batas ronde habis tanpa kesepakatan) → hasil.
 
 export function createRunState() {
   return {
@@ -15,9 +15,13 @@ export function createRunState() {
     consensus: 'unanimous',
     web: true,
     verify: true,
+    researchEnabled: false,
     memory: [],
     startedAt: null,
     frame: null,
+    literature: null, // { queries, papers, stats, errors }
+    research: null, // { insights, gaps, why_now, claims, ms, usage, search }
+    researchVerified: null,
     rounds: new Map(),
     claims: new Map(),
     warnings: [],
@@ -58,14 +62,23 @@ export function applyEvent(state, e) {
       state.consensus = e.consensus || 'unanimous'
       state.web = e.web !== false
       state.verify = e.verify !== false
+      state.researchEnabled = Boolean(e.research)
       state.memory = e.memory || []
       state.startedAt = e.ts || null
       for (const p of state.panel) state.labels[p.id] = p.alias ? `${p.alias} · ${p.label}` : p.label
       state.labels.memori = 'sidang sebelumnya'
+      state.labels.peneliti = 'Peneliti'
       for (const c of e.memoryClaims || []) state.claims.set(c.id, { ...c, by: new Set(['memori']) })
       break
     case 'framed':
-      state.frame = { question: e.question, criteria: e.criteria || [], context: e.context || '' }
+      state.frame = { question: e.question, criteria: e.criteria || [], context: e.context || '', obvious: e.obvious || [], queries: e.queries || [] }
+      break
+    case 'literature':
+      state.literature = { queries: e.queries || [], papers: e.papers || [], stats: e.stats || {}, errors: e.errors || [] }
+      break
+    case 'researched':
+      state.research = { insights: e.insights || [], gaps: e.gaps || [], why_now: e.why_now || [], claims: e.claims || [], ms: e.ms, usage: e.usage, search: e.search || null, at: e.ts || null }
+      addClaims(state, 'peneliti', e.claims)
       break
     case 'round_started': {
       const r = roundOf(state, e.round)
@@ -78,17 +91,20 @@ export function applyEvent(state, e) {
       roundOf(state, e.round).agents[e.agent] = { status: 'running', startedAt: e.ts || null }
       break
     case 'agent_finished':
-      roundOf(state, e.round).agents[e.agent] = { status: 'done', ms: e.ms, repaired: e.repaired, usage: e.usage, response: e.response || {} }
+      roundOf(state, e.round).agents[e.agent] = { status: 'done', ms: e.ms, repaired: e.repaired, usage: e.usage, search: e.search || null, response: e.response || {} }
       addClaims(state, e.agent, e.response?.claims)
       break
     case 'agent_failed':
       roundOf(state, e.round).agents[e.agent] = { status: 'failed', ms: e.ms, error: e.error }
       break
     case 'verified': {
-      roundOf(state, e.round).verified = { total: e.total, counts: e.counts || {} }
+      // Ronde 0 = klaim dari tahap riset (sebelum ronde debat pertama).
+      const summary = { total: e.total, counts: e.counts || {} }
+      if (e.round === 0) state.researchVerified = summary
+      else roundOf(state, e.round).verified = summary
       for (const v of e.claims || []) {
         const c = state.claims.get(v.id)
-        if (c) c.verification = { status: v.status, detail: v.detail }
+        if (c) c.verification = { status: v.status, detail: v.detail, ...(v.source ? { source: v.source } : {}) }
       }
       break
     }
@@ -132,7 +148,9 @@ function afterPanel(state, n) {
 }
 
 const TEXT = {
-  frame: 'Moderator mengubah topikmu menjadi pertanyaan sidang dan kriteria keberhasilan.',
+  frame: 'Moderator mengubah topikmu menjadi pertanyaan sidang, kriteria keberhasilan, dan daftar jawaban klise yang harus dilampaui.',
+  research:
+    'Program mencari paper di Semantic Scholar, OpenAlex, dan arXiv. Peneliti AI membaca abstraknya, mencari laporan, regulasi, dan thesis di web, lalu menulis temuan yang tidak umum diketahui.',
   blind: 'Panelis menjawab sendiri-sendiri tanpa melihat jawaban yang lain, sambil mencari data di web.',
   critique: 'Panelis membaca draft moderator dan jawaban panelis lain, mengkritik, lalu memberi suara atas draft.',
   verify: 'Program membuka setiap sumber yang dikutip dan mencari kutipannya di halaman itu.',
@@ -149,6 +167,16 @@ export function stepsOf(state, run = {}) {
   const push = (key, title, status, extra = {}) => steps.push({ key, title, status, ...extra })
 
   push('frame', 'Rumuskan pertanyaan', state.frame ? 'done' : ended ? 'skipped' : 'active', { detail: TEXT.frame })
+
+  if (state.researchEnabled) {
+    // Selesai saat ronde 1 dimulai (cek sumber klaim riset termasuk di tahap ini).
+    let s = 'pending'
+    if (state.rounds.has(1) || (ended && state.research)) s = 'done'
+    else if (ended) s = 'skipped'
+    else if (state.frame) s = 'active'
+    const found = state.literature ? `${state.literature.papers.length} sumber ilmiah ditemukan` : null
+    push('research', 'Riset literatur & insight', s, { detail: TEXT.research, note: state.research ? `${state.research.insights.length} insight ditulis; sumbernya sedang dicek.` : found ? `${found}; peneliti sedang membaca.` : null })
+  }
 
   let reachedConsensus = false
   const n = Math.max(state.maxRounds, debateRounds(state).length)
@@ -220,15 +248,23 @@ export function stageOf(state, run = {}) {
 export function tokensSoFar(state) {
   if (state.finished?.usage?.tokens) return { ...state.finished.usage.tokens, complete: true }
   const t = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, complete: false }
+  const add = (u) => {
+    if (!u) return
+    t.input += u.input || 0
+    t.cacheRead += u.cacheRead || 0
+    t.cacheWrite += u.cacheWrite || 0
+    t.output += u.output || 0
+  }
+  add(state.research?.usage?.tokens)
   for (const r of state.rounds.values()) {
-    for (const a of Object.values(r.agents)) {
-      const u = a.usage?.tokens
-      if (!u) continue
-      t.input += u.input || 0
-      t.cacheRead += u.cacheRead || 0
-      t.cacheWrite += u.cacheWrite || 0
-      t.output += u.output || 0
-    }
+    for (const a of Object.values(r.agents)) add(a.usage?.tokens)
   }
   return t
+}
+
+// Pencarian web yang dilaporkan penyedia (peneliti + panelis). null kalau tidak ada agen yang diberi web search.
+export function searchesSoFar(state) {
+  const all = [state.research?.search, ...[...state.rounds.values()].flatMap((r) => Object.values(r.agents).map((a) => a.search))].filter(Boolean)
+  if (!all.length) return null
+  return { requests: all.reduce((n, s) => n + (s.requests || 0), 0), calls: all.length, withoutSearch: all.filter((s) => !s.requests).length }
 }
