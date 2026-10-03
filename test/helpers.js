@@ -80,7 +80,7 @@ function anthropicReply({ model, messages, tools }, { url, disagree }) {
 
 // Server lokal yang meniru API DeepSeek (format OpenAI di /, format Anthropic di /anthropic) dan halaman
 // sumber untuk uji URL. `rejectSearch`: endpoint Anthropic menolak tool web search (HTTP 400).
-export async function startFakeApi({ models = ['fake-flash', 'fake-pro'], apiKey = 'sk-test', rejectSearch = false, disagree = false } = {}) {
+export async function startFakeApi({ models = ['fake-flash', 'fake-pro'], apiKey = 'sk-test', rejectSearch = false, disagree = false, delayMs = 0 } = {}) {
   const requests = []
   let url
   const server = http.createServer((req, res) => {
@@ -97,6 +97,10 @@ export async function startFakeApi({ models = ['fake-flash', 'fake-pro'], apiKey
         return res.end('<p>Node.js 24 adalah versi LTS.</p>')
       }
       if (req.url === '/anthropic/v1/messages') {
+        if (delayMs) return setTimeout(() => answerAnthropic(), delayMs)
+        return answerAnthropic()
+      }
+      function answerAnthropic() {
         if (req.headers['x-api-key'] !== apiKey) return send(401, { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } })
         const data = JSON.parse(body)
         if (!models.includes(data.model)) return send(400, { type: 'error', error: { type: 'invalid_request_error', message: `Model Not Exist: ${data.model}` } })

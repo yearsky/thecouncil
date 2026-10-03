@@ -19,7 +19,7 @@ import { runDoctor } from '../doctor.js'
 import { createVerifier } from '../evidence/verify.js'
 import { clearSessionCookie, makeSessionCookie, readCookie, safeEqual, sessionSecret, validBearer, validSession } from './auth.js'
 import { runConfigErrors } from './config.js'
-import { createRun, readEvents, readMemory, readMeta, runKey, runSlice } from './runner.js'
+import { ACTIVE_KEY, createRun, makeRunId, parseActive, readEvents, readMemory, readMeta, runKey, runSlice } from './runner.js'
 
 export const DEFAULT_LIMITS = {
   // Batas durasi fungsi Vercel (Hobby, Fluid compute: 300 dtk). Panggilan baru hanya dimulai kalau masih ada
@@ -174,21 +174,48 @@ export function createApp({
       memory.push(m)
     }
 
-    const activeId = await kv.get('active')
-    if (activeId) {
-      const active = await readMeta(kv, activeId)
-      if (active?.status === 'running') throw new HttpError(409, 'masih ada sidang yang berjalan; tunggu selesai atau batalkan dulu', { active: activeId })
+    const created = now()
+    const id = makeRunId(topic, created)
+    await claimSlot(id)
+    let meta
+    try {
+      const day = created.toISOString().slice(0, 10)
+      const used = Number((await kv.get(`quota:${day}`)) || 0)
+      if (used >= limits.dailyRuns) throw new HttpError(429, `batas ${limits.dailyRuns} sidang per hari tercapai`)
+      await kv.incr(`quota:${day}`)
+      await kv.expire(`quota:${day}`, 2 * 86400)
+      meta = await createRun(kv, { id, topic, config: cfg, memory, now: created })
+    } catch (err) {
+      await releaseSlot(id)
+      throw err
     }
-    const day = now().toISOString().slice(0, 10)
-    const used = Number((await kv.get(`quota:${day}`)) || 0)
-    if (used >= limits.dailyRuns) throw new HttpError(429, `batas ${limits.dailyRuns} sidang per hari tercapai`)
-    await kv.incr(`quota:${day}`)
-    await kv.expire(`quota:${day}`, 2 * 86400)
-
-    const meta = await createRun(kv, { topic, config: cfg, memory, now: now() })
-    await kv.set('active', meta.id)
     kick(meta.id)
     return json(201, { run: runSummary(meta, true) })
+  }
+
+  // Hanya satu sidang berjalan pada satu waktu. Slot diklaim dengan SET NX (atomik), jadi dua permintaan
+  // bersamaan tidak bisa sama-sama lolos. Nilai slot memuat waktu klaim: pemegang yang meta sidangnya belum ada
+  // dianggap sedang dibuat (bukan basi) selama STARTING_MS. Pemegang yang sidangnya sudah berhenti boleh
+  // digantikan, tapi hanya oleh satu permintaan (kunci "active-clear:<nilai slot>").
+  const STARTING_MS = 120000
+
+  async function claimSlot(id) {
+    const value = `${id}|${now().getTime()}`
+    if (await kv.set(ACTIVE_KEY, value, { nx: true })) return
+    const current = await kv.get(ACTIVE_KEY)
+    const holder = parseActive(current)
+    if (holder) {
+      const meta = await readMeta(kv, holder.id)
+      const starting = !meta && now().getTime() - holder.at < STARTING_MS
+      if (meta?.status === 'running' || starting) throw new HttpError(409, 'masih ada sidang yang berjalan; tunggu selesai atau batalkan dulu', { active: holder.id })
+      if (!(await kv.set(`active-clear:${current}`, id, { nx: true, ex: 60 }))) throw new HttpError(409, 'sidang lain sedang dimulai; coba lagi sebentar')
+      if ((await kv.get(ACTIVE_KEY)) === current) await kv.del(ACTIVE_KEY)
+    }
+    if (!(await kv.set(ACTIVE_KEY, value, { nx: true }))) throw new HttpError(409, 'sidang lain sedang dimulai; coba lagi sebentar')
+  }
+
+  async function releaseSlot(id) {
+    if (parseActive(await kv.get(ACTIVE_KEY))?.id === id) await kv.del(ACTIVE_KEY)
   }
 
   async function events(id, after) {

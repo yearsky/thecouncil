@@ -569,7 +569,13 @@ Dibaca langsung dari paket npm `@vercel/functions` 3.9.11: `waitUntil` dan `getD
 4. Slice berikutnya dimulai oleh siapa pun yang membuka sidang (`GET /api/runs/<id>/events/<n>`), kalau sidang belum selesai dan tidak ada slice yang berjalan (kunci `SET NX` di Redis). Jadi sidang **berhenti sementara kalau tidak ada yang membuka** (K9), dan lanjut sendiri begitu dibuka lagi.
 5. Kalau jurnal gagal disimpan, sidang dihentikan dengan pesan jelas, karena tanpa jurnal slice berikutnya bisa mendapat jawaban berbeda.
 
-Kunci Redis: `run:<id>:meta|events|journal|lock|cancel|report`, `memory:<id>`, `runs`, `active`, `quota:<tanggal>`, `login-fail:<ip>`, `models`.
+Kunci Redis: `run:<id>:meta|events|journal|lock|cancel|report`, `memory:<id>`, `runs`, `active`, `active-clear:<nilai slot>`, `quota:<tanggal>`, `login-fail:<ip>`, `models`.
+
+Batas waktu dan slot:
+
+- Satu panggilan agen DeepSeek, termasuk lanjutan `pause_turn` dan percobaan tanpa web search, berbagi satu batas waktu (`timeoutMs`). Dengan begitu satu panggilan tidak pernah melewati waktu yang disisakan runner.
+- Slot "satu sidang berjalan" (`active`, nilainya `<id>|<waktu klaim>`) diklaim dengan `SET NX`, jadi dua permintaan bersamaan tidak bisa sama-sama lolos. Pemegang yang sidangnya belum tercatat dianggap sedang dibuat selama 2 menit. Pemegang yang sidangnya sudah berhenti boleh digantikan, tapi hanya oleh satu permintaan.
+- Sidang yang selesai dengan status `error` (mis. semua panelis gagal) dicatat sebagai error, bukan selesai, dan tidak menyimpan memori untuk dilanjutkan.
 
 ### Memori sidang (K8)
 

@@ -156,3 +156,15 @@ test('agen format Anthropic (DeepSeek): web search di sisi server, pause_turn, t
   process.env.TEST_DS_KEY = 'salah'
   await assert.rejects(fallback.ask({ prompt: 'cari', webSearch: true }), /HTTP 401/)
 })
+
+test('agen format Anthropic: satu batas waktu untuk seluruh percakapan, termasuk lanjutan pause_turn', async (t) => {
+  const api = await startFakeApi({ delayMs: 150 })
+  t.after(api.close)
+  process.env.TEST_DS_KEY = 'sk-test'
+  t.after(() => delete process.env.TEST_DS_KEY)
+  const make = (timeoutMs) => createAgent('ds', { type: 'anthropic-compatible', baseURL: `${api.url}/anthropic`, model: 'fake-flash', apiKeyEnv: 'TEST_DS_KEY', timeoutMs })
+  // Tiap request 150 ms (di bawah 250 ms), tapi dua request berurutan melewati 250 ms.
+  await assert.rejects(make(250).ask({ prompt: 'PAUSE lalu cari', webSearch: true }), /tidak merespons dalam/)
+  const ok = await make(1000).ask({ prompt: 'PAUSE lalu cari', webSearch: true })
+  assert.match(ok.text, /Node\.js 24/)
+})
