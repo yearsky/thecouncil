@@ -141,6 +141,8 @@ Di Vercel hanya agen API (bayar per token) yang dipakai. Claude/Codex lewat logi
    | `COUNCIL_CONFIG` | Opsional: config JSON pengganti [examples/deepseek-only.json](examples/deepseek-only.json) |
 
 5. Deploy, buka URL-nya, login, lalu buka **Cek agen**: cek cepat dulu, lalu cek lengkap (memakai sedikit token). Cek lengkap menunjukkan apakah web search DeepSeek jalan.
+   - Project Vercel baru memakai **Vercel Authentication**, jadi login Vercel dulu di browser (juga di HP).
+   - Cek cepat apakah fungsinya jalan: buka `/api?path=health`, harus menampilkan `{"ok":true,"kv":"upstash","auth":true,...}`.
 6. Di **Sidang baru**, pilih model tiap panelis dari daftar, lalu mulai.
 
 Cara kerjanya di Vercel:

@@ -50,12 +50,29 @@ async function body(request) {
   }
 }
 
-// Vercel: /api/<rute> ditulis ulang ke /api?path=<rute> (vercel.json). Lokal: path langsung.
+// UI dan bot memanggil /api?path=<rute>: query string pada request langsung ke /api pasti sampai ke fungsi.
+// Path langsung (/api/<rute>) tetap diterima untuk `council ui` dan untuk rewrite di vercel.json; di Vercel,
+// rewrite itu ternyata tidak membawa rutenya ke fungsi (login gagal dengan "belum login", 3 Okt 2026).
 export function routeOf(request) {
   const url = new URL(request.url)
   const fromQuery = url.searchParams.get('path')
-  const route = fromQuery !== null ? fromQuery : url.pathname.replace(/^\/api\/?/, '')
+  const route = fromQuery !== null ? fromQuery : url.pathname.replace(/^\/api(\/index(\.js)?)?(\/|$)/, '')
   return route.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean).map(decodeURIComponent)
+}
+
+// Rute yang butuh login. Rute lain dijawab 404 sebelum pengecekan login, supaya alamat yang salah tidak
+// menyamar jadi "belum login".
+function knownRoute(method, [head, id, sub]) {
+  if (head === 'runs') {
+    if (!id) return method === 'GET' || method === 'POST'
+    return (method === 'GET' && (sub === 'events' || sub === 'report')) || (method === 'POST' && sub === 'cancel')
+  }
+  return method === 'GET' && ['config', 'models', 'doctor', 'memories'].includes(head)
+}
+
+const seenUrl = (request) => {
+  const url = new URL(request.url)
+  return `${url.pathname}${url.search}`
 }
 
 function runSummary(meta, active = false) {
@@ -238,13 +255,16 @@ export function createApp({
   }
 
   async function route(request) {
-    const [head, id, sub, arg] = routeOf(request)
+    const parts = routeOf(request)
+    const [head, id, sub, arg] = parts
     const method = request.method
-    if (method === 'GET' && head === 'health') return json(200, { ok: true, kv: kv.kind, auth: requireAuth ? Boolean(env.COUNCIL_PASSWORD) : 'lokal' })
+    const unknown = () => new HttpError(404, `rute tidak dikenal: ${method} /api/${parts.join('/')} (diterima: ${seenUrl(request)})`)
+    if (method === 'GET' && head === 'health') return json(200, { ok: true, kv: kv.kind, auth: requireAuth ? Boolean(env.COUNCIL_PASSWORD) : 'lokal', route: parts.join('/') })
     if (method === 'POST' && head === 'login') return login(request)
     if (method === 'POST' && head === 'logout') return json(200, { ok: true }, { 'Set-Cookie': clearSessionCookie(secureCookie) })
     if (method === 'GET' && head === 'me') return json(200, { loggedIn: authorized(request), authRequired: requireAuth })
 
+    if (!knownRoute(method, parts)) throw unknown()
     if (!authorized(request)) throw new HttpError(401, 'belum login')
 
     if (method === 'GET' && head === 'config') {
@@ -286,7 +306,7 @@ export function createApp({
       }
     }
     if (method === 'GET' && head === 'memories') return json(200, { runs: await listRuns(true) })
-    throw new HttpError(404, `rute tidak dikenal: ${method} /api/${[head, id, sub, arg].filter(Boolean).join('/')}`)
+    throw unknown()
   }
 
   return {

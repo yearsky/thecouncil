@@ -67,10 +67,32 @@ async function login(call) {
   return r.headers.get('set-cookie').split(';')[0]
 }
 
-test('routeOf: path langsung (lokal) maupun ?path= (rewrite Vercel)', () => {
+test('routeOf: path langsung (lokal), ?path= (UI), dan URL fungsi Vercel /api/index', () => {
   assert.deepEqual(routeOf(new Request('https://x.test/api/runs/a%20b/events/3')), ['runs', 'a b', 'events', '3'])
   assert.deepEqual(routeOf(new Request('https://x.test/api?path=runs/abc/events/3')), ['runs', 'abc', 'events', '3'])
+  assert.deepEqual(routeOf(new Request(`https://x.test/api?path=${encodeURIComponent('runs/a b/events/3')}`)), ['runs', 'a b', 'events', '3'])
+  assert.deepEqual(routeOf(new Request('https://x.test/api/index?path=login')), ['login'])
+  assert.deepEqual(routeOf(new Request('https://x.test/api/index.js?path=login')), ['login'])
+  assert.deepEqual(routeOf(new Request('https://x.test/api/index')), [])
   assert.deepEqual(routeOf(new Request('https://x.test/api')), [])
+})
+
+test('rute tak dikenal dijawab 404 (bukan "belum login"), lengkap dengan URL yang diterima fungsi', async () => {
+  const { app } = setup()
+  const send = async (url, method = 'GET') => {
+    const res = await app.handle(new Request(url, { method, headers: { 'content-type': 'application/json' }, body: method === 'POST' ? '{}' : undefined }))
+    return { status: res.status, data: await res.json() }
+  }
+  const lost = await send('https://x.test/api/index', 'POST')
+  assert.equal(lost.status, 404)
+  assert.match(lost.data.error, /rute tidak dikenal: POST \/api\/ \(diterima: \/api\/index\)/)
+  assert.match((await send('https://x.test/api?path=apa')).data.error, /diterima: \/api\?path=apa/)
+  // Rute yang dikenal tetap butuh login.
+  for (const [method, path] of [['GET', 'config'], ['GET', 'models'], ['GET', 'doctor/quick'], ['GET', 'runs'], ['POST', 'runs'], ['GET', 'runs/x/events/0'], ['POST', 'runs/x/cancel'], ['GET', 'runs/x/report'], ['GET', 'memories']]) {
+    const r = await send(`https://x.test/api?path=${encodeURIComponent(path)}`, method)
+    assert.equal(r.status, 401, `${method} ${path}`)
+  }
+  assert.deepEqual((await send('https://x.test/api?path=health')).data, { ok: true, kv: 'memory', auth: true, route: 'health' })
 })
 
 test('config cloud: hanya agen API, model wajib dipilih, COUNCIL_CONFIG bisa menggantikan', () => {
@@ -237,7 +259,7 @@ test('council ui menyalakan server lokal', async (t) => {
     child.on('exit', (code) => reject(new Error(`keluar dengan kode ${code}`)))
   })
   const health = await (await fetch(`${url}/api/health`)).json()
-  assert.deepEqual(health, { ok: true, kv: 'memory', auth: 'lokal' })
+  assert.deepEqual(health, { ok: true, kv: 'memory', auth: 'lokal', route: 'health' })
   const cfg = await (await fetch(`${url}/api/config`)).json()
   assert.deepEqual(cfg.panel.map((a) => a.id), ['claude', 'codex', 'deepseek'])
 })
