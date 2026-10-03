@@ -270,6 +270,36 @@ button:disabled {
   min-width: 0;
 }
 
+/* Bar status menempel di atas; topik panjang dipotong tampilannya supaya tidak menutupi layar. */
+.status-bar .topic {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.run-title {
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+.topic-full {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 0.9rem;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -464,6 +494,10 @@ details > summary {
 }
 
 @media (max-width: 520px) {
+  .status-bar .topic {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
   .check-line {
     grid-template-columns: 1.4em 1fr;
   }
