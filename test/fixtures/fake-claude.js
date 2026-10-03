@@ -3,6 +3,7 @@
 // event "init" lalu (opsional) pemanggilan tool lalu event "result".
 // Prompt sidang dikenali dari baris "Tahap: ..." dan dijawab dengan JSON yang masuk akal.
 // Mode lewat env FAKE_CLAUDE_MODE: ok (bawaan) | not-logged-in | no-search | plugins | disagree.
+// FAKE_CLAUDE_DELAY_MS menunda jawaban (uji UI).
 import { fenced, stageAnswer, stageOf } from './stage-answers.js'
 
 const args = process.argv.slice(2)
@@ -18,7 +19,10 @@ const source = process.env.FAKE_URL || 'https://example.invalid/x'
 
 let input = ''
 process.stdin.on('data', (d) => (input += d))
-process.stdin.on('end', () => {
+// FAKE_CLAUDE_DELAY_MS: jeda sebelum menjawab, untuk melihat keadaan "sedang menjawab" di uji UI.
+process.stdin.on('end', () => setTimeout(respond, Number(process.env.FAKE_CLAUDE_DELAY_MS || 0)))
+
+function respond() {
   const tools = flag('--tools') ? flag('--tools').split(',') : []
   out({
     type: 'system',
@@ -41,4 +45,4 @@ process.stdin.on('end', () => {
   else if (tools.includes('WebSearch')) answer = `Node.js 24 adalah LTS terbaru. Sumber: ${source}.`
   else answer = input.includes('SIAP') ? 'SIAP' : 'tidak tahu'
   out({ type: 'result', subtype: 'success', is_error: false, result: answer, total_cost_usd: 0.001, args })
-})
+}
