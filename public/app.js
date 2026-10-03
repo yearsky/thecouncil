@@ -134,6 +134,18 @@ function md(source) {
   return box
 }
 
+// Topik pendek jadi judul. Topik panjang: judul dari awal teksnya, teks utuh di "Topik lengkap" dengan baris
+// yang tetap seperti saat ditulis.
+const TOPIC_TITLE_MAX = 160
+
+function topicHeading(topic) {
+  const text = String(topic || '')
+  if (text.length <= TOPIC_TITLE_MAX) return el('h1', { class: 'run-title' }, text)
+  const firstLine = text.split('\n')[0]
+  const head = firstLine.length > TOPIC_TITLE_MAX ? `${firstLine.slice(0, TOPIC_TITLE_MAX).trimEnd()}…` : firstLine
+  return el('div', {}, el('h1', { class: 'run-title' }, head), el('details', {}, el('summary', {}, 'Topik lengkap'), el('div', { class: 'topic-full' }, text)))
+}
+
 // ---------- API ----------
 
 // Rute dikirim lewat ?path= (bukan /api/<rute>), karena di Vercel rewrite /api/<rute> tidak sampai ke fungsi.
@@ -370,7 +382,7 @@ function createRunView(id) {
           el(
             'div',
             { class: 'card' },
-            el('h1', {}, e.topic),
+            topicHeading(e.topic),
             el('div', { class: 'note' }, `Panel: ${e.panel.map((p) => `${p.label}${p.model ? ` (${p.model})` : ''}${p.alias ? ` = ${p.alias}` : ''}`).join(' · ')}`),
             el(
               'div',
@@ -535,7 +547,8 @@ function renderStatus(run, view) {
         )
       : null
   const parts = [
-    el('span', { class: 'grow' }, el('strong', {}, run.topic)),
+    // Topik panjang dipotong tampilannya (CSS) supaya bar yang menempel di atas tidak menutupi layar.
+    el('span', { class: 'grow topic', title: run.topic }, el('strong', {}, run.topic)),
     badge(label),
     run.status === 'running' ? el('span', { class: 'note' }, `slice ${run.slices}`) : null,
     run.error ? el('span', { class: 'note warn' }, run.error) : null,
