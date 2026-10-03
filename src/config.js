@@ -4,8 +4,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { EFFORT_LEVELS } from './agents/claude.js'
 import { CONSENSUS_MODES } from './council/consensus.js'
+import { SCHOLAR_SOURCES } from './evidence/scholar.js'
 
-export const EFFORT_STAGES = ['frame', 'panel', 'judge', 'vote', 'repair']
+export const EFFORT_STAGES = ['frame', 'research', 'panel', 'judge', 'vote', 'repair']
 
 export const CONFIG_FILE = 'council.config.json'
 
@@ -20,8 +21,13 @@ export const DEFAULT_CONFIG = {
   verify: true,
   searchBudget: 3,
   devilsAdvocate: true,
+  // Tiap panelis mendapat lensa berpikir berbeda (peneliti, orang dalam industri, investor kontrarian).
+  lenses: true,
+  // Tahap riset sebelum debat (docs/PLAN.md §19): literatur dari indeks ilmiah + peneliti AI (model moderator).
+  // sources: semanticscholar, openalex, arxiv. searchBudget: batas pencarian web peneliti.
+  research: { enabled: true, sources: ['semanticscholar', 'openalex', 'arxiv'], maxQueries: 6, perQuery: 5, keep: 12, searchBudget: 6 },
   // Effort Claude per tahap (kosong = bawaan model). Lihat docs/PLAN.md §16 sebelum menurunkannya.
-  effort: { frame: '', panel: '', judge: '', vote: '', repair: 'low' },
+  effort: { frame: '', research: '', panel: '', judge: '', vote: '', repair: 'low' },
   agents: {
     claude: { type: 'claude-cli', bin: 'claude', model: 'sonnet', timeoutMs: 300000, extraArgs: [] },
     codex: { type: 'codex-cli', bin: 'codex', model: '', timeoutMs: 300000, webSearchArgs: ['-c', 'web_search=live'], extraArgs: [] },
@@ -45,7 +51,14 @@ export function mergeConfig(base, user = {}) {
   for (const id of new Set([...Object.keys(base.agents), ...Object.keys(user.agents || {})])) {
     agents[id] = { ...base.agents[id], ...user.agents?.[id] }
   }
-  return { ...base, ...user, moderator: { ...base.moderator, ...user.moderator }, effort: { ...base.effort, ...user.effort }, agents }
+  return {
+    ...base,
+    ...user,
+    moderator: { ...base.moderator, ...user.moderator },
+    effort: { ...base.effort, ...user.effort },
+    research: { ...base.research, ...(typeof user.research === 'boolean' ? { enabled: user.research } : user.research) },
+    agents
+  }
 }
 
 export function validateConfig(config) {
@@ -57,6 +70,9 @@ export function validateConfig(config) {
   for (const [stage, level] of Object.entries(config.effort || {})) {
     if (!EFFORT_STAGES.includes(stage)) errors.push(`effort: tahap "${stage}" tidak dikenal (${EFFORT_STAGES.join(', ')})`)
     else if (level && !EFFORT_LEVELS.includes(level)) errors.push(`effort.${stage}: "${level}" harus salah satu dari ${EFFORT_LEVELS.join(', ')} atau kosong`)
+  }
+  for (const name of config.research?.sources || []) {
+    if (!Object.hasOwn(SCHOLAR_SOURCES, name)) errors.push(`research.sources: "${name}" tidak dikenal (${Object.keys(SCHOLAR_SOURCES).join(', ')})`)
   }
   return errors
 }
@@ -109,6 +125,7 @@ export function applyRunOptions(base, values) {
   }
   if (values['no-web']) config.web = false
   if (values['no-verify']) config.verify = false
+  if (values['no-research']) config.research = { ...config.research, enabled: false }
   for (const pair of values.effort || []) {
     const [stage, level = ''] = pair.split('=').map((s) => s.trim())
     if (!pair.includes('=') || !EFFORT_STAGES.includes(stage)) errors.push(`--effort "${pair}": formatnya <tahap>=<level>, tahap salah satu dari ${EFFORT_STAGES.join(', ')}`)

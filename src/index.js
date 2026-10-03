@@ -7,6 +7,7 @@ import { applyRunOptions, loadConfig, loadEnv, validateConfig } from './config.j
 import { runCouncil } from './council/protocol.js'
 import { buildReport } from './council/report.js'
 import { createVerifier } from './evidence/verify.js'
+import { literatureSearcher } from './evidence/scholar.js'
 import { formatDoctor, runDoctor } from './doctor.js'
 import { memoryFromResult } from './council/memory.js'
 import { createSession, readMemory } from './store/session.js'
@@ -29,6 +30,7 @@ Opsi run:
   --no-web                       Matikan web search
   --search-budget <n>            Maks. pencarian web per panelis per ronde (bawaan 3, 0 = tanpa batas)
   --no-verify                    Jangan periksa sumber klaim
+  --no-research                  Lewati tahap riset literatur sebelum debat
   --lanjut <folder sesi>         Lanjutkan dari sidang lama: kesimpulan + klaim ✅-nya ikut (boleh berulang)
   --effort <tahap=level>         Effort Claude per tahap (frame|panel|judge|vote|repair = low..max), boleh berulang
   --json                         Cetak event JSON per baris (untuk bot WhatsApp)
@@ -53,6 +55,7 @@ const OPTIONS = {
   quick: { type: 'boolean' },
   'no-web': { type: 'boolean' },
   'no-verify': { type: 'boolean' },
+  'no-research': { type: 'boolean' },
   'search-budget': { type: 'string' },
   effort: { type: 'string', multiple: true },
   json: { type: 'boolean' },
@@ -125,6 +128,9 @@ async function run(values, topicParts) {
       web: config.web,
       searchBudget: config.searchBudget,
       devilsAdvocate: config.devilsAdvocate,
+      lenses: config.lenses,
+      research: config.research?.enabled ? config.research : null,
+      literatureSearch: config.research?.enabled ? literatureSearcher(config.research) : null,
       effort: config.effort,
       verify: config.verify ? createVerifier() : null,
       memory,

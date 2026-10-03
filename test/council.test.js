@@ -40,7 +40,9 @@ test('normalizeVote menerima variasi penulisan dan menolak nilai asing', () => {
 })
 
 test('validateFrame dan validateJudge', () => {
-  assert.deepEqual(validateFrame({ question: 'Q?', criteria: ['a', ''] }), { question: 'Q?', criteria: ['a'], context: '' })
+  assert.deepEqual(validateFrame({ question: 'Q?', criteria: ['a', ''] }), { question: 'Q?', criteria: ['a'], context: '', obvious: [], queries: [] })
+  const f = validateFrame({ question: 'Q?', obvious: ['chatbot WhatsApp', ''], queries: 'kredit petani' })
+  assert.deepEqual([f.obvious, f.queries], [['chatbot WhatsApp'], ['kredit petani']])
   assert.throws(() => validateFrame({}), /"question" kosong/)
   const j = validateJudge({ draft: 'D', agreements: ['x'] })
   assert.equal(j.summary, 'D')

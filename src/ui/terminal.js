@@ -60,9 +60,10 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
 
   function printResponse(label, event) {
     const r = event.response
-    print(`${style.bold(style.cyan(`[${label}]`))} ${style.dim(secs(event.ms) + (event.repaired ? ' · format diperbaiki' : ''))}`)
+    const searched = event.search ? ` · ${event.search.requests} pencarian` : ''
+    print(`${style.bold(style.cyan(`[${label}]`))} ${style.dim(secs(event.ms) + searched + (event.repaired ? ' · format diperbaiki' : ''))}`)
     if (r.position) print(indent(clip(r.position)))
-    for (const p of r.proposals || []) print(`  ${style.bold('▸')} ${p.id}: ${p.title}`)
+    for (const p of r.proposals || []) print(`  ${style.bold('▸')} ${p.id}: ${p.title}${p.basis?.length ? style.dim(` [${p.basis.join(', ')}]`) : ''}`)
     if (r.claims?.length || r.cited_claims?.length) {
       const sourced = (r.claims || []).filter((c) => c.source_url).length
       const parts = []
@@ -88,7 +89,7 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
         moderator = `Moderator · ${event.moderator.label}`
         print(style.bold('━━ The Council ━━'))
         print(`Topik: ${event.topic}`)
-        print(style.dim(`Panel: ${event.panel.map((p) => `${p.label}${p.model ? ` (${p.model})` : ''}${p.alias ? ` = ${p.alias}` : ''}`).join(' · ')}`))
+        print(style.dim(`Panel: ${event.panel.map((p) => `${p.label}${p.model ? ` (${p.model})` : ''}${p.alias ? ` = ${p.alias}` : ''}${p.lens ? ` [${p.lens}]` : ''}`).join(' · ')}`))
         print(
           style.dim(
             `Moderator: ${event.moderator.label}${event.moderator.model ? ` (${event.moderator.model})` : ''} · maks. ${event.maxRounds} ronde · konsensus: ${event.consensus === 'majority' ? 'mayoritas' : 'bulat'} · web: ${event.web ? 'aktif' : 'mati'} · verifikasi: ${event.verify ? 'aktif' : 'mati'}`
@@ -101,6 +102,17 @@ export function createTerminalRenderer({ out = process.stdout, style = createSty
         print(`${style.bold(style.cyan(`[${moderator}]`))} Pertanyaan: ${event.question}`)
         for (const c of event.criteria) print(`  • ${c}`)
         if (event.context) print(style.dim(`  Konteks: ${event.context}`))
+        if (event.obvious?.length) print(style.dim(`  Jawaban klise yang harus dilampaui: ${event.obvious.join('; ')}`))
+        print()
+        break
+      case 'literature':
+        print(`${style.bold('[Literatur]')} ${event.papers.length} sumber dari ${event.queries.length} kata kunci`)
+        for (const p of event.papers) print(style.dim(`  ${p.id} ${p.title} (${p.year || '?'}${p.venue ? `, ${p.venue}` : ''})`))
+        print()
+        break
+      case 'researched':
+        print(`${style.bold(style.cyan('[Peneliti]'))} ${event.insights.length} insight${event.search ? ` · ${event.search.requests} pencarian web` : ''}`)
+        for (const x of event.insights) print(indent(`${x.id}: ${x.finding}${x.sources.length ? style.dim(` (${x.sources.join(', ')})`) : ''}`))
         print()
         break
       case 'warning':

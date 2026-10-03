@@ -43,11 +43,17 @@ node src/index.js run "..." --json > events.jsonl     # event per baris, untuk b
 
 Jalannya sidang:
 
-1. Moderator merumuskan pertanyaan dan kriteria keberhasilan.
-2. **Ronde 1 (blind):** semua panelis menjawab paralel tanpa melihat jawaban yang lain.
-3. Moderator merangkum hasilnya dan menyusun draft kesimpulan.
-4. **Ronde kritik:** panelis membaca draft dan jawaban panelis lain, mengkritik, memperbarui posisinya, lalu memberi suara atas draft.
-5. Sidang berhenti kalau semua setuju. Kalau batas ronde habis dan belum sepakat, ada pemungutan suara akhir, dan hasilnya dilaporkan apa adanya: bulat, mayoritas, atau tidak ada konsensus.
+1. Moderator merumuskan pertanyaan, kriteria keberhasilan, dan daftar **jawaban klise** yang harus dilampaui.
+2. **Riset literatur** (bawaan aktif; matikan dengan `--no-research`):
+   - Program mencari paper di Semantic Scholar, OpenAlex, dan arXiv, lalu mengambil judul dan abstraknya.
+   - Peneliti AI (model moderator) membaca abstrak itu dan mencari laporan, regulasi, dan thesis di web.
+   - Hasilnya insight bersumber: temuan yang tidak umum diketahui, masalah yang belum terpecahkan, dan "why now".
+3. **Ronde 1 (blind):** semua panelis menjawab paralel tanpa melihat jawaban yang lain.
+   - Tiap panelis mendapat **lensa berpikir** berbeda: peneliti, orang dalam industri, atau investor kontrarian.
+   - Usulan wajib berangkat dari temuan riset, dan menyebut dasarnya, kenapa tidak umum, dan kenapa baru mungkin sekarang.
+4. Moderator merangkum hasilnya dan menyusun draft kesimpulan. Moderator wajib menilai kebaruan, bukan hanya kelayakan.
+5. **Ronde kritik:** panelis membaca draft dan jawaban panelis lain, mengkritik, memperbarui posisinya, lalu memberi suara atas draft.
+6. Sidang berhenti kalau semua setuju. Kalau batas ronde habis dan belum sepakat, ada pemungutan suara akhir, dan hasilnya dilaporkan apa adanya: bulat, mayoritas, atau tidak ada konsensus.
 
 Fitur yang menjaga debat tetap jujur (Fase 2):
 
@@ -59,6 +65,8 @@ Fitur yang menjaga debat tetap jujur (Fase 2):
   - ➖ klaim fakta tanpa sumber
 
   Moderator hanya boleh menyimpulkan dari klaim ✅.
+- **Kutipan dari paper dicek ke abstraknya.** Abstrak diambil program, bukan ditulis AI, jadi kutipan dari sumber S1, S2, … bisa dicek tanpa membuka situs penerbit.
+- **Jumlah pencarian web terlihat.** Kartu panelis menampilkan "🔎 N pencarian" yang dilaporkan penyedia, jadi terlihat apakah AI benar-benar mencari atau menjawab dari ingatan.
 - **Daftar klaim bersama (K1, K2, …).** Setiap klaim ditulis sekali, dan panelis cukup merujuk ID-nya.
 - **Anonim.** Panelis dan moderator hanya melihat "Panelis A/B/C", bukan nama modelnya. Pemetaan aslinya ada di laporan.
 - **Devil's advocate.** Di setiap ronde kritik, satu panelis bergiliran wajib mencari kelemahan draft.
@@ -139,6 +147,8 @@ Di Vercel hanya agen API (bayar per token) yang dipakai. Claude/Codex lewat logi
    | `COUNCIL_API_TOKEN` | Opsional: token untuk bot WhatsApp (`Authorization: Bearer ...`) |
    | `COUNCIL_DAILY_RUNS` | Opsional: batas sidang per hari (bawaan 10) |
    | `COUNCIL_CONFIG` | Opsional: config JSON pengganti [examples/deepseek-only.json](examples/deepseek-only.json) |
+   | `OPENALEX_API_KEY` | Opsional: key gratis dari openalex.org untuk riset literatur. Tanpa key, kuota hariannya kecil |
+   | `SEMANTIC_SCHOLAR_API_KEY` | Opsional: menaikkan batas permintaan Semantic Scholar |
 
 5. Deploy, buka URL-nya, login, lalu buka **Cek agen**: cek cepat dulu, lalu cek lengkap (memakai sedikit token). Cek lengkap menunjukkan apakah web search DeepSeek jalan.
    - Project Vercel baru memakai **Vercel Authentication**, jadi login Vercel dulu di browser (juga di HP).
@@ -168,6 +178,8 @@ Doctor lengkap memakai sedikit kuota:
 - Codex: 2 panggilan
 - DeepSeek: 1 panggilan berbayar
 
+Kalau riset literatur aktif, doctor (juga `--quick`) menguji Semantic Scholar, OpenAlex, dan arXiv dengan satu pencarian kecil. Ini tidak memakai kuota AI. Sumber yang bermasalah hanya diberi peringatan, karena sidang tetap bisa jalan tanpanya.
+
 Arti tanda: ✔ siap · ⚠ peringatan · ✖ gagal · – dilewati · • info
 
 Hal yang paling penting dilihat dari hasilnya:
@@ -190,6 +202,10 @@ Hal yang paling penting dilihat dari hasilnya:
 | `agents.<id>.pricing` | Opsional, untuk estimasi biaya agen API: `{"input": 0.3, "cacheRead": 0.006, "output": 1.2}` (USD per 1 juta token; isi dari halaman harga resmi) |
 | `agents.<id>.extraArgs` | Argumen tambahan untuk CLI, mis. `["--restricted"]` untuk Claude |
 | `agents.<id>.timeoutMs` | Batas waktu per panggilan, dalam milidetik |
+| `research.enabled` | Tahap riset literatur sebelum debat (bawaan `true`; `--no-research` mematikannya untuk satu sidang) |
+| `research.sources` | Indeks ilmiah: `semanticscholar`, `openalex`, `arxiv` |
+| `research.searchBudget` | Batas pencarian web peneliti (bawaan 6) |
+| `lenses` | Lensa berpikir berbeda per panelis (bawaan `true`) |
 
 Jangan menambahkan `--bare` untuk Claude: dengan flag itu, login langganan tidak terbaca.
 

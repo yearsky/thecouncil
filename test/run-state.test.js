@@ -1,9 +1,9 @@
 // Model halaman sidang (public/run-state.js): tahap aktif dan stepper dari event sidang sungguhan.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyEvent, createRunState, stageOf, stepsOf, tokensSoFar } from '../public/run-state.js'
+import { applyEvent, createRunState, searchesSoFar, stageOf, stepsOf, tokensSoFar } from '../public/run-state.js'
 import { runCouncil } from '../src/council/protocol.js'
-import { scriptedAgent } from './helpers.js'
+import { FAKE_PAPER, scriptedAgent } from './helpers.js'
 
 async function eventsOf({ maxRounds = 2, consensus = 'unanimous', verify = true, script = {} } = {}) {
   const events = []
@@ -108,4 +108,37 @@ test('klaim terkumpul dengan status verifikasi; token panelis dijumlahkan', asyn
   const t = tokensSoFar(state)
   assert.equal(t.complete, false)
   assert.equal(t.output, 10 * 6) // 6 jawaban panelis × 10 token (agen palsu)
+})
+
+test('tahap riset: aktif setelah pertanyaan dirumuskan sampai ronde 1 mulai; klaim riset dan pencarian tercatat', async () => {
+  const events = []
+  const panel = ['a', 'b'].map((id) => scriptedAgent(id, {}, { webSearch: true, searches: 2 }))
+  await runCouncil({
+    topic: 'Topik uji',
+    panel,
+    moderator: { agent: panel[0] },
+    maxRounds: 2,
+    random: () => 0.999999,
+    emit: (e) => events.push(e),
+    research: { enabled: true, searchBudget: 6 },
+    literatureSearch: async () => ({ papers: [FAKE_PAPER], errors: [], stats: {} }),
+    verify: async (pending) => new Map(pending.map((c) => [c.id, { status: 'verified', detail: 'uji' }]))
+  })
+  assert.deepEqual(stepsOf(applyEvent(createRunState(), events[0])).map((s) => s.key).slice(0, 3), ['frame', 'research', 'panel-1'])
+  assert.deepEqual(active(stageAfter(events, (e) => e.type === 'framed').stage), ['research'])
+  const lit = stageAfter(events, (e) => e.type === 'literature')
+  assert.deepEqual(active(lit.stage), ['research'])
+  assert.match(lit.stage.step.note, /1 sumber ilmiah ditemukan/)
+  const researched = stageAfter(events, (e) => e.type === 'verified' && e.round === 0)
+  assert.deepEqual(active(researched.stage), ['research'])
+  assert.ok(!researched.state.rounds.has(0), 'verifikasi riset bukan ronde debat')
+  assert.equal(researched.state.researchVerified.total, 2)
+  assert.deepEqual(active(stageAfter(events, (e) => e.type === 'round_started' && e.round === 1).stage), ['panel-1'])
+
+  const end = stageAfter(events, (e) => e.type === 'finished').state
+  assert.equal(end.research.insights.length, 2)
+  assert.equal(end.literature.papers[0].id, 'S1')
+  assert.deepEqual([...end.claims.values()].find((c) => c.source === 'S1')?.verification, { status: 'verified', detail: 'kutipan ada di abstrak S1', source: 'S1' })
+  assert.deepEqual(searchesSoFar(end), { requests: 2 * 4 + 2, calls: 5, withoutSearch: 0 })
+  assert.ok(tokensSoFar(end).complete)
 })

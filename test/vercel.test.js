@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import { memoryKv } from '../src/store/kv.js'
-import { startFakeApi } from './helpers.js'
+import { startFakeApi, startFakeScholar } from './helpers.js'
 
 async function startFakeUpstash(token) {
   const kv = memoryKv()
@@ -66,11 +66,15 @@ async function startFakeUpstash(token) {
   return { url: `http://127.0.0.1:${server.address().port}`, commands, close: () => new Promise((resolve) => server.close(resolve)) }
 }
 
+const messages_ = (api) => api.requests.filter((q) => q.url === '/anthropic/v1/messages')
+
 test('fungsi Vercel: login, sidang DeepSeek dengan web search sampai selesai, laporan', async (t) => {
   const deepseek = await startFakeApi()
   const redis = await startFakeUpstash('redis-token')
+  const scholar = await startFakeScholar()
   t.after(deepseek.close)
   t.after(redis.close)
+  t.after(scholar.close)
   const agent = (label) => ({ type: 'anthropic-compatible', label, baseURL: `${deepseek.url}/anthropic`, modelsURL: deepseek.url, model: '', apiKeyEnv: 'DEEPSEEK_API_KEY' })
   Object.assign(process.env, {
     KV_REST_API_URL: redis.url,
@@ -81,6 +85,8 @@ test('fungsi Vercel: login, sidang DeepSeek dengan web search sampai selesai, la
       moderator: { agent: 'pro', model: '' },
       panel: ['pro', 'flash'],
       maxRounds: 2,
+      // Jeda antar-permintaan dimatikan supaya uji cepat; base URL ke server literatur palsu.
+      research: { baseURLs: scholar.baseURLs, gaps: { semanticscholar: 0, openalex: 0, arxiv: 0 } },
       agents: { pro: agent('DeepSeek Pro'), flash: agent('DeepSeek Flash') }
     })
   })
@@ -127,11 +133,26 @@ test('fungsi Vercel: login, sidang DeepSeek dengan web search sampai selesai, la
   const finished = events.at(-1)
   assert.equal(finished.type, 'finished')
   assert.equal(finished.status, 'unanimous')
-  assert.equal(finished.verification.verified, 1)
   assert.equal(new Set(events.map((e) => e.id)).size, events.length)
 
-  // Panelis memakai tool web search DeepSeek; moderator tidak.
-  const messages = deepseek.requests.filter((q) => q.url === '/anthropic/v1/messages')
+  // Tahap riset: literatur dari server palsu (Semantic Scholar + OpenAlex), peneliti DeepSeek dengan web search,
+  // kutipan abstrak S1 dicek ke abstraknya (✅ tanpa membuka doi.org).
+  const literature = events.find((e) => e.type === 'literature')
+  assert.deepEqual(literature.papers.map((p) => p.title), ['Credit scoring for smallholder farmers using satellite data', 'Cold chain losses in Indonesian fisheries'])
+  assert.ok(scholar.requests.some((u) => u.startsWith('/graph/v1/paper/search?query=smallholder%20credit%20scoring')))
+  const researched = events.find((e) => e.type === 'researched')
+  assert.deepEqual(researched.insights[0].sources, ['S1'])
+  assert.equal(researched.search.requests, 1)
+  const fromAbstract = events.find((e) => e.type === 'verified' && e.round === 0).claims.find((c) => c.source === 'S1')
+  assert.equal(fromAbstract.status, 'verified')
+  assert.equal(fromAbstract.detail, 'kutipan ada di abstrak S1')
+  assert.equal(finished.verification.verified, 2)
+  const research = messages_(deepseek).find((q) => /Tahap: RESEARCH/.test(q.body.messages[0].content))
+  assert.equal(research.body.tools[0].max_uses, 6)
+  assert.ok(events.filter((e) => e.type === 'agent_finished' && e.round === 1).every((e) => e.search?.requests === 1))
+
+  // Panelis dan peneliti memakai tool web search DeepSeek; moderator (FRAME, JUDGE) tidak.
+  const messages = messages_(deepseek)
   const panelCalls = messages.filter((q) => /Tahap: PANEL/.test(q.body.messages[0].content))
   assert.ok(panelCalls.length >= 2)
   assert.ok(panelCalls.every((q) => q.body.tools?.[0]?.type === 'web_search_20250305' && q.body.tools[0].max_uses === 3))

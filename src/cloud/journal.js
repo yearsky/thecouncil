@@ -167,6 +167,7 @@ export function createReplay({ journal, gate, seqBase = 0 }) {
             system: req.system || null,
             prompt: req.prompt,
             webSearch: Boolean(req.webSearch),
+            ...(req.searchUses ? { searchUses: req.searchUses } : {}),
             effort: req.effort || null
           })
           return run(nextKey(`ask:${base}`), () => agent.ask(req), { restore: (value, meta) => ({ ...value, elapsedMs: meta.elapsedMs }) })
@@ -179,6 +180,11 @@ export function createReplay({ journal, gate, seqBase = 0 }) {
         const base = hashKey(pending.map((c) => [c.id, c.text, c.source_url || '', c.quote || '']))
         return run(nextKey(`verify:${base}`), async () => [...(await verify(pending))], { restore: (entries) => new Map(entries) })
       }
+    },
+    // Pekerjaan lain yang hasilnya harus sama saat diputar ulang (mis. pencarian literatur). Hasilnya harus JSON.
+    task(kind, fn) {
+      if (!fn) return null
+      return (...args) => run(nextKey(`${kind}:${hashKey(args)}`), async () => fn(...args))
     },
     // Tunggu panggilan dan penulisan jurnal selesai. Error penulisan dikembalikan supaya runner bisa
     // menghentikan sidang: tanpa jurnal, slice berikutnya bisa mendapat jawaban yang berbeda.

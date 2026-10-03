@@ -1,8 +1,8 @@
-// Halaman sidang: sidebar proses (stepper, panel, pemakaian) + tab Ringkasan / Debat / Klaim / Detail.
+// Halaman sidang: sidebar proses (stepper, panel, pemakaian) + tab Ringkasan / Riset / Debat / Klaim / Detail.
 // Dirender ulang dari model run-state.js setiap ada event baru; pilihan pengguna (tab, ronde, kartu yang dibuka,
 // filter klaim) disimpan di `view` supaya tidak hilang saat render ulang.
 
-import { applyEvent, createRunState, debateRounds, stageOf, tokensSoFar } from './run-state.js'
+import { applyEvent, createRunState, debateRounds, searchesSoFar, stageOf, tokensSoFar } from './run-state.js'
 import { FLAG, STATUS, VERIFY, VOTE, apiUrl, badge, el, md, num } from './ui.js'
 
 const RESULT = {
@@ -23,12 +23,18 @@ const CLAIM_GROUPS = [
 ]
 
 const HOW_IT_WORKS = [
-  ['Rumuskan pertanyaan', 'Moderator mengubah topikmu menjadi pertanyaan sidang dan kriteria keberhasilan.'],
-  ['Ronde 1 · jawaban independen', 'Setiap panelis menjawab sendiri tanpa melihat jawaban yang lain, sambil mencari data di web.'],
+  ['Rumuskan pertanyaan', 'Moderator mengubah topikmu menjadi pertanyaan sidang, kriteria keberhasilan, dan daftar jawaban klise yang harus dilampaui.'],
+  [
+    'Riset literatur',
+    'Program mencari paper di indeks ilmiah (Semantic Scholar, OpenAlex, arXiv). Peneliti AI membaca abstraknya, mencari laporan, regulasi, dan thesis di web, lalu menulis insight bersumber sebagai bahan berpikir panelis.'
+  ],
+  ['Ronde 1 · jawaban independen', 'Setiap panelis menjawab sendiri dengan lensa berpikir berbeda, tanpa melihat jawaban yang lain. Usulan wajib berangkat dari temuan, bukan dari ide yang sudah umum.'],
   ['Cek sumber', 'Program (bukan AI) membuka setiap URL yang dikutip dan mencari kutipannya. ✅ berarti kutipan memang ada di halaman itu.'],
   ['Rangkuman & ronde kritik', 'Moderator menyusun draft kesimpulan dari klaim ✅. Panelis lalu mengkritik draft dan jawaban panelis lain, dan memberi suara.'],
   ['Hasil', 'Sidang berhenti saat panelis sepakat. Kalau batas ronde habis, ada suara akhir dan hasilnya dilaporkan apa adanya.']
 ]
+
+const SOURCE_LABEL = { semanticscholar: 'Semantic Scholar', openalex: 'OpenAlex', arxiv: 'arXiv' }
 
 export function duration(ms) {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -110,7 +116,8 @@ export function createRunPage({ id, api, root }) {
                   { class: 'step-detail' },
                   s.detail,
                   s.progress ? el('div', { class: 'progress' }, el('span', { style: `width:${(100 * s.progress.done) / Math.max(1, s.progress.total)}%` })) : null,
-                  s.progress ? el('span', { class: 'muted' }, `${s.progress.done} dari ${s.progress.total} panelis selesai`) : null
+                  s.progress ? el('span', { class: 'muted' }, `${s.progress.done} dari ${s.progress.total} panelis selesai`) : null,
+                  s.note ? el('span', { class: 'muted step-note' }, s.note) : null
                 )
               : null
           )
@@ -176,7 +183,7 @@ export function createRunPage({ id, api, root }) {
           'div',
           { class: 'person' },
           el('span', { class: 'avatar', 'aria-hidden': 'true' }, (p.alias || p.label).replace('Panelis ', '').slice(0, 1)),
-          el('div', { class: 'person-body' }, el('strong', {}, p.alias || p.label), el('span', { class: 'muted' }, `${p.label}${p.model ? ` · ${p.model}` : ''}`)),
+          el('div', { class: 'person-body' }, el('strong', {}, p.alias || p.label, p.lens ? el('span', { class: 'lens' }, p.lens) : null), el('span', { class: 'muted' }, `${p.label}${p.model ? ` · ${p.model}` : ''}`)),
           el('span', { class: `chip ${st[1]}` }, st[0], a?.status === 'running' ? [' ', since(a.startedAt, 'clock small')] : null)
         )
       }),
@@ -193,7 +200,20 @@ export function createRunPage({ id, api, root }) {
       el('div', {}, el('span', { class: 'muted' }, 'Token masuk'), el('strong', {}, num(t.input + t.cacheRead + t.cacheWrite))),
       el('div', {}, el('span', { class: 'muted' }, 'Token keluar'), el('strong', {}, num(t.output))),
       el('div', {}, el('span', { class: 'muted' }, 'Klaim ✅'), el('strong', {}, `${counts.verified || 0} / ${state.claims.size}`)),
+      searchStat(),
       t.complete ? null : el('p', { class: 'muted small' }, 'Token moderator baru dihitung di akhir sidang.')
+    )
+  }
+
+  // Jumlah pencarian web yang dilaporkan penyedia. Menjawab "apakah AI benar-benar mencari?".
+  function searchStat() {
+    const s = searchesSoFar(state)
+    if (!s) return null
+    return el(
+      'div',
+      { title: s.withoutSearch ? `${s.withoutSearch} jawaban tanpa satu pun pencarian` : 'Semua jawaban dengan web search memakai pencarian' },
+      el('span', { class: 'muted' }, 'Pencarian web'),
+      el('strong', {}, `${s.requests}${s.withoutSearch ? ` · ${s.withoutSearch} tanpa` : ''}`)
     )
   }
 
@@ -227,14 +247,17 @@ export function createRunPage({ id, api, root }) {
   }
 
   function renderTabs() {
+    const showResearch = state.researchEnabled || state.literature || state.research || state.frame?.obvious?.length
     const items = [
       ['ringkasan', state.finished ? 'Hasil' : 'Ringkasan'],
-      ['debat', `Debat${debateRounds(state).length ? ` (${debateRounds(state).length})` : ''}`],
-      ['klaim', `Klaim (${state.claims.size})`],
+      showResearch ? ['riset', 'Riset', state.research?.insights.length] : null,
+      ['debat', 'Debat', debateRounds(state).length || null],
+      ['klaim', 'Klaim', state.claims.size],
       ['detail', 'Detail']
     ]
+    if (view.tab === 'riset' && !showResearch) view.tab = 'ringkasan'
     tabs.replaceChildren(
-      ...items.map(([key, label]) =>
+      ...items.filter(Boolean).map(([key, label, count]) =>
         el(
           'button',
           {
@@ -247,7 +270,8 @@ export function createRunPage({ id, api, root }) {
               render()
             }
           },
-          label
+          label,
+          count != null ? el('span', { class: 'tab-count' }, String(count)) : null
         )
       )
     )
@@ -332,6 +356,7 @@ export function createRunPage({ id, api, root }) {
       el('span', { class: 'kicker' }, stage.kind === 'paused' ? 'Dijeda' : stage.kind === 'running' ? 'Sedang berlangsung' : 'Status'),
       el('h2', {}, stage.title),
       el('p', {}, stage.detail),
+      step?.note ? el('p', { class: 'muted small' }, step.note) : null,
       stage.kind === 'paused' ? el('p', { class: 'muted small' }, 'Sidang dilanjutkan otomatis selama halaman ini terbuka.') : null,
       running.length
         ? el(
@@ -367,6 +392,17 @@ export function createRunPage({ id, api, root }) {
       if (lastVotes) nodes.push(el('section', { class: 'card' }, el('span', { class: 'kicker' }, `Suara terakhir · ronde ${lastVotes.round}`), votesTable(lastVotes.votes)))
     }
 
+    if (state.research?.insights.length) {
+      nodes.push(
+        el(
+          'section',
+          { class: 'card' },
+          el('span', { class: 'kicker' }, `Bahan riset · ${state.research.insights.length} insight dari ${state.literature?.papers.length || 0} sumber ilmiah`),
+          el('ul', { class: 'compact' }, state.research.insights.slice(0, 3).map((x) => el('li', {}, el('strong', {}, `${x.id} `), x.finding))),
+          el('a', { href: '#', onclick: (ev) => (ev.preventDefault(), (view.tab = 'riset'), render()) }, 'Lihat semua insight dan sumber')
+        )
+      )
+    }
     if (state.frame) {
       nodes.push(
         el(
@@ -397,7 +433,12 @@ export function createRunPage({ id, api, root }) {
       'header',
       {},
       el('span', { class: 'avatar', 'aria-hidden': 'true' }, (p.alias || p.label).replace('Panelis ', '').slice(0, 1)),
-      el('div', { class: 'person-body' }, el('strong', {}, p.alias || p.label), el('span', { class: 'muted' }, `${p.label}${p.model ? ` · ${p.model}` : ''}`)),
+      el(
+        'div',
+        { class: 'person-body' },
+        el('strong', {}, p.alias || p.label, p.lens ? el('span', { class: 'lens', title: 'Lensa berpikir panelis ini' }, p.lens) : null),
+        el('span', { class: 'muted' }, `${p.label}${p.model ? ` · ${p.model}` : ''}`)
+      ),
       r.devil === p.id ? el('span', { class: 'chip warn', title: "Devil's advocate: wajib mencari kelemahan draft" }, 'devil’s advocate') : null
     )
     if (!a) return el('article', { class: 'agent-card waiting-card' }, headLine, el('p', { class: 'muted' }, 'Menunggu giliran.'))
@@ -415,7 +456,21 @@ export function createRunPage({ id, api, root }) {
       x.vote ? el('div', { class: 'vote-line' }, badge(VOTE[x.vote.on_draft] || [x.vote.on_draft])) : null,
       x.position ? el('p', { class: `position${open ? '' : ' clamp'}` }, x.position) : null,
       proposals.length
-        ? el('ul', { class: 'proposals' }, (open ? proposals : proposals.slice(0, 2)).map((pr) => el('li', {}, el('strong', {}, pr.title), open && pr.why ? el('span', { class: 'muted' }, ` — ${pr.why}`) : null)))
+        ? el(
+            'ul',
+            { class: 'proposals' },
+            (open ? proposals : proposals.slice(0, 2)).map((pr) =>
+              el(
+                'li',
+                {},
+                el('strong', {}, pr.title),
+                pr.basis?.length ? el('span', { class: 'basis' }, pr.basis.map((ref) => refChip(ref))) : null,
+                open && pr.why ? el('span', { class: 'muted' }, ` — ${pr.why}`) : null,
+                open && pr.non_obvious ? el('span', { class: 'sub' }, el('em', {}, 'Tidak umum karena: '), pr.non_obvious) : null,
+                open && pr.why_now ? el('span', { class: 'sub' }, el('em', {}, 'Kenapa sekarang: '), pr.why_now) : null
+              )
+            )
+          )
         : null,
       ids.length
         ? el(
@@ -431,13 +486,124 @@ export function createRunPage({ id, api, root }) {
       open && x.changed_mind?.changed ? el('p', { class: 'note' }, `Berubah pendapat: ${x.changed_mind.what} (karena: ${x.changed_mind.because || 'tidak disebutkan'})`) : null,
       open && x.vote?.blocking_objections?.length ? el('ul', { class: 'vote-notes' }, x.vote.blocking_objections.map((o) => el('li', {}, el('strong', {}, 'Keberatan: '), o))) : null,
       open && x.vote?.reservations?.length ? el('ul', { class: 'vote-notes' }, x.vote.reservations.map((o) => el('li', {}, 'Catatan: ', o))) : null,
+      open && a.search?.urls?.length ? searchList(a.search) : null,
       el(
         'footer',
         {},
-        el('span', { class: 'muted small' }, [a.ms !== undefined ? duration(a.ms) : null, tokens ? `${num(tokens.input + tokens.cacheRead + tokens.cacheWrite)} → ${num(tokens.output)} token` : null, a.repaired ? 'format diperbaiki' : null].filter(Boolean).join(' · ')),
+        el(
+          'span',
+          { class: 'muted small' },
+          [a.ms !== undefined ? duration(a.ms) : null, a.search ? searchText(a.search) : null, tokens ? `${num(tokens.input + tokens.cacheRead + tokens.cacheWrite)} → ${num(tokens.output)} token` : null, a.repaired ? 'format diperbaiki' : null]
+            .filter(Boolean)
+            .join(' · ')
+        ),
         el('button', { type: 'button', class: 'link', onclick: toggle }, open ? 'Ringkas' : 'Selengkapnya')
       )
     )
+  }
+
+  const searchText = (s) => (s.requests ? `🔎 ${s.requests} pencarian` : '🔎 tidak mencari')
+  const searchList = (s) =>
+    el(
+      'details',
+      { class: 'search-list' },
+      el('summary', {}, `Halaman dari pencarian (${s.results})`),
+      el('ul', {}, s.urls.map((u) => el('li', {}, el('a', { href: u, target: '_blank', rel: 'noopener noreferrer' }, host(u)))))
+    )
+
+  // Chip rujukan: S (sumber literatur), I (insight), K (klaim, dengan status verifikasinya).
+  function refChip(ref) {
+    const paper = state.literature?.papers.find((p) => p.id === ref)
+    if (paper) return el('a', { class: 'chip ref', href: paper.url, target: '_blank', rel: 'noopener noreferrer', title: paper.title }, ref)
+    const insight = state.research?.insights.find((x) => x.id === ref)
+    if (insight) return el('button', { type: 'button', class: 'chip ref', title: insight.finding, onclick: () => ((view.tab = 'riset'), render()) }, ref)
+    const claim = state.claims.get(ref)
+    if (claim) return el('span', { class: 'chip ref', title: claim.text }, `${ref} ${groupOf(claim).icon}`)
+    return el('span', { class: 'chip ref' }, ref)
+  }
+
+  // ---------- tab Riset ----------
+
+  function renderResearch() {
+    const nodes = []
+    const lit = state.literature
+    const res = state.research
+    if (state.frame?.obvious?.length) {
+      nodes.push(
+        el(
+          'section',
+          { class: 'card cliche-card' },
+          el('span', { class: 'kicker' }, 'Jawaban klise yang harus dilampaui'),
+          el('p', { class: 'muted small' }, 'Disusun moderator sebelum debat. Usulan yang sama dengan daftar ini harus punya pembeda yang didukung sumber.'),
+          el('ul', { class: 'chips' }, state.frame.obvious.map((o) => el('li', { class: 'chip strike' }, o)))
+        )
+      )
+    }
+    if (!res && !lit) {
+      nodes.push(el('section', { class: 'card' }, el('p', { class: 'muted' }, state.researchEnabled ? 'Riset dimulai setelah pertanyaan sidang dirumuskan.' : 'Riset literatur dimatikan untuk sidang ini.')))
+      return nodes
+    }
+    if (res) {
+      const meta = [res.ms !== undefined ? duration(res.ms) : null, res.search ? searchText(res.search) : null, state.researchVerified ? `${state.researchVerified.total} klaim dicek` : null].filter(Boolean).join(' · ')
+      nodes.push(
+        el(
+          'section',
+          { class: 'card' },
+          el('span', { class: 'kicker' }, `Insight peneliti · ${res.insights.length}`),
+          el('p', { class: 'muted small' }, 'Insight adalah tafsiran AI; buktinya ada di sumber S dan klaim K yang dirujuk. ', meta),
+          el(
+            'div',
+            { class: 'insight-list' },
+            res.insights.map((x) =>
+              el(
+                'article',
+                { class: 'insight' },
+                el('header', {}, el('strong', {}, x.id), el('span', { class: 'basis' }, x.sources.length ? x.sources.map(refChip) : el('span', { class: 'chip warn' }, 'tanpa sumber'))),
+                el('p', {}, x.finding),
+                x.why_non_obvious ? el('p', { class: 'sub' }, el('em', {}, 'Tidak umum karena: '), x.why_non_obvious) : null,
+                x.implication ? el('p', { class: 'sub' }, el('em', {}, 'Implikasi: '), x.implication) : null,
+                x.open_question ? el('p', { class: 'sub muted' }, el('em', {}, 'Belum pasti: '), x.open_question) : null
+              )
+            )
+          ),
+          res.search?.urls?.length ? searchList(res.search) : null
+        )
+      )
+      if (res.gaps.length || res.why_now.length) nodes.push(el('section', { class: 'card' }, el('div', { class: 'grid-2' }, points('Masalah yang belum terpecahkan', res.gaps, 'warn'), points('Yang baru berubah (why now)', res.why_now, 'ok'))))
+    } else if (lit) {
+      nodes.push(el('section', { class: 'card live-card running' }, el('span', { class: 'kicker' }, 'Sedang berlangsung'), el('h2', {}, 'Peneliti sedang membaca'), el('p', {}, `${lit.papers.length} sumber ilmiah ditemukan. Peneliti membaca abstraknya dan mencari laporan, regulasi, dan thesis di web.`)))
+    }
+    if (lit) {
+      const sources = Object.entries(lit.stats || {})
+        .map(([k, v]) => `${SOURCE_LABEL[k] || k}: ${v.results} hasil`)
+        .join(' · ')
+      nodes.push(
+        el(
+          'section',
+          { class: 'card' },
+          el('span', { class: 'kicker' }, `Sumber literatur · ${lit.papers.length}`),
+          el('p', { class: 'muted small' }, 'Judul dan abstrak diambil program dari indeks ilmiah, bukan ditulis AI. Kutipan dari abstrak dicek langsung ke teks ini.', sources ? ` (${sources})` : ''),
+          lit.queries.length ? el('p', { class: 'small' }, el('span', { class: 'muted' }, 'Kata kunci: '), lit.queries.join(' · ')) : null,
+          lit.papers.length
+            ? el(
+                'ol',
+                { class: 'paper-list' },
+                lit.papers.map((p) =>
+                  el(
+                    'li',
+                    { class: 'paper' },
+                    el('div', {}, el('span', { class: 'chip ref' }, p.id), ' ', p.url ? el('a', { href: p.url, target: '_blank', rel: 'noopener noreferrer' }, p.title) : p.title),
+                    el('span', { class: 'muted small' }, [p.year, p.venue, p.citations != null ? `${p.citations} sitasi` : null, p.authors?.length ? `${p.authors[0]}${p.authors.length > 1 ? ' dkk.' : ''}` : null].filter(Boolean).join(' · ')),
+                    p.abstract || p.tldr ? el('details', {}, el('summary', {}, 'Abstrak'), el('p', { class: 'small' }, p.abstract || p.tldr)) : null
+                  )
+                )
+              )
+            : el('p', { class: 'muted' }, 'Tidak ada sumber ilmiah yang ditemukan; peneliti hanya memakai pencarian web.'),
+          lit.errors?.length ? el('p', { class: 'note warn' }, `Sebagian pencarian gagal: ${[...new Set(lit.errors.map((e) => `${e.source} (${e.message})`))].join('; ')}`) : null
+        )
+      )
+    }
+    return nodes
   }
 
   function renderDebate() {
@@ -508,7 +674,7 @@ export function createRunPage({ id, api, root }) {
     if (!filters.some(([k]) => k === view.claimFilter)) view.claimFilter = 'all'
     const shown = claims.filter((c) => view.claimFilter === 'all' || groupOf(c).key === view.claimFilter)
     return [
-      el('p', { class: 'muted small' }, 'Status dicek oleh program: halaman sumber dibuka dan kutipannya dicari. ❔ berarti situsnya tidak bisa dibuka otomatis, bukan berarti salah.'),
+      el('p', { class: 'muted small' }, 'Status dicek oleh program: halaman sumber dibuka dan kutipannya dicari (untuk sumber literatur, dicari di abstraknya). ❔ berarti situsnya tidak bisa dibuka otomatis, bukan berarti salah.'),
       el(
         'div',
         { class: 'segmented wrap', role: 'group', 'aria-label': 'Saring klaim' },
@@ -536,7 +702,7 @@ export function createRunPage({ id, api, root }) {
           return el(
             'article',
             { class: `claim ${g.key}` },
-            el('header', {}, el('strong', {}, c.id), el('span', { class: 'chip' }, `${g.icon} ${c.verification?.detail || g.label}`), el('span', { class: 'chip' }, c.kind)),
+            el('header', {}, el('strong', {}, c.id), el('span', { class: 'chip' }, `${g.icon} ${c.verification?.detail || g.label}`), el('span', { class: 'chip' }, c.kind), c.source ? refChip(c.source) : null),
             el('p', {}, c.text),
             c.source_url ? el('p', { class: 'small' }, el('a', { href: c.source_url, target: '_blank', rel: 'noopener noreferrer' }, host(c.source_url)), c.quote ? el('span', { class: 'muted' }, ` — "${c.quote}"`) : null) : null,
             el('p', { class: 'muted small' }, `oleh ${[...(c.by || [])].map(name).join(', ')}`)
@@ -551,12 +717,13 @@ export function createRunPage({ id, api, root }) {
   function renderDetail() {
     const u = state.finished?.usage
     const rows = [
-      ['Panel', state.panel.map((p) => `${p.alias ? `${p.alias} = ` : ''}${p.label}${p.model ? ` (${p.model})` : ''}`).join(', ')],
+      ['Panel', state.panel.map((p) => `${p.alias ? `${p.alias} = ` : ''}${p.label}${p.model ? ` (${p.model})` : ''}${p.lens ? ` · lensa ${p.lens}` : ''}`).join(', ')],
       ['Moderator', state.moderator ? `${state.moderator.label}${state.moderator.model ? ` (${state.moderator.model})` : ''}` : '–'],
       ['Ronde maks.', String(state.maxRounds || '–')],
       ['Konsensus', state.consensus === 'majority' ? 'mayoritas' : 'bulat'],
       ['Web search', state.web ? 'aktif' : 'mati'],
       ['Verifikasi sumber', state.verify ? 'aktif (oleh program)' : 'mati'],
+      ['Riset literatur', state.researchEnabled ? 'aktif' : 'mati'],
       ['Melanjutkan', state.memory.length ? state.memory.map((m) => m.question).join('; ') : '–']
     ]
     return [
@@ -569,7 +736,7 @@ export function createRunPage({ id, api, root }) {
             'section',
             { class: 'card' },
             el('span', { class: 'kicker' }, 'Pemakaian'),
-            el('p', {}, `${u.calls} panggilan AI${u.failedCalls ? ` (${u.failedCalls} gagal)` : ''}${u.costUsd ? ` · estimasi $${u.costUsd.toFixed(4)}` : ''}${u.truncated ? ` · ⚠️ ${u.truncated} jawaban kena batas maxTokens` : ''}`),
+            el('p', {}, `${u.calls} panggilan AI${u.failedCalls ? ` (${u.failedCalls} gagal)` : ''}${u.searches ? ` · ${u.searches} pencarian web` : ''}${u.costUsd ? ` · estimasi $${u.costUsd.toFixed(4)}` : ''}${u.truncated ? ` · ⚠️ ${u.truncated} jawaban kena batas maxTokens` : ''}`),
             el(
               'div',
               { class: 'table-wrap' },
@@ -606,7 +773,8 @@ export function createRunPage({ id, api, root }) {
     renderSide(stage)
     renderHead()
     renderTabs()
-    const content = view.tab === 'debat' ? renderDebate() : view.tab === 'klaim' ? renderClaims() : view.tab === 'detail' ? renderDetail() : renderSummary(stage)
+    const content =
+      view.tab === 'riset' ? renderResearch() : view.tab === 'debat' ? renderDebate() : view.tab === 'klaim' ? renderClaims() : view.tab === 'detail' ? renderDetail() : renderSummary(stage)
     panel.replaceChildren(...content.filter(Boolean))
   }
 

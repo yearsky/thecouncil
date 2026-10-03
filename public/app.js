@@ -69,6 +69,7 @@ async function openNew(params) {
     $('#consensus').value = config.defaults.consensus
     $('#web').checked = config.defaults.web
     $('#verify').checked = config.defaults.verify
+    $('#research').checked = config.defaults.research !== false
     $('#topic').maxLength = config.limits.maxTopicChars
     box.dataset.ready = '1'
   }
@@ -97,6 +98,7 @@ async function submitRun(event) {
     consensus: $('#consensus').value,
     web: $('#web').checked,
     verify: $('#verify').checked,
+    research: $('#research').checked,
     models,
     moderatorModel,
     memory: [...document.querySelectorAll('#memory-list input:checked')].map((i) => i.value)
@@ -171,7 +173,7 @@ async function runDoctor(quick) {
   try {
     const report = await api(quick ? 'doctor/quick' : 'doctor')
     out.replaceChildren(
-      ...report.results.map((r) =>
+      ...[...report.results, ...(report.literature ? [report.literature] : [])].map((r) =>
         el(
           'div',
           { class: 'card stack' },

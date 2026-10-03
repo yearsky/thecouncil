@@ -80,7 +80,7 @@ test('council.config.example.json sama dengan config bawaan', () => {
 
 test('effort: digabung per tahap, divalidasi, dan bisa diganti lewat --effort', () => {
   const merged = mergeConfig(DEFAULT_CONFIG, { effort: { vote: 'low' } })
-  assert.deepEqual(merged.effort, { frame: '', panel: '', judge: '', vote: 'low', repair: 'low' })
+  assert.deepEqual(merged.effort, { frame: '', research: '', panel: '', judge: '', vote: 'low', repair: 'low' })
   assert.deepEqual(validateConfig(merged), [])
   const bad = mergeConfig(DEFAULT_CONFIG, { effort: { vote: 'sangat-rendah', tidur: 'low' } })
   assert.equal(validateConfig(bad).length, 2)

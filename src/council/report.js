@@ -23,7 +23,7 @@ export const FLAG_LABEL = {
   unknown_citation: 'merujuk ID klaim yang tidak ada'
 }
 
-const STAGE_LABEL = { frame: 'Merumuskan pertanyaan', panel: 'Jawaban panelis', judge: 'Rangkuman moderator', vote: 'Suara akhir', repair: 'Perbaikan format JSON' }
+const STAGE_LABEL = { frame: 'Merumuskan pertanyaan', research: 'Riset (peneliti)', panel: 'Jawaban panelis', judge: 'Rangkuman moderator', vote: 'Suara akhir', repair: 'Perbaikan format JSON' }
 
 const cell = (text) => String(text ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
 const secs = (ms) => `${(ms / 1000).toFixed(1)} dtk`
@@ -71,12 +71,13 @@ export function buildReport(result) {
   out.push('| | |', '|---|---|')
   out.push(`| Topik | ${cell(result.topic)} |`)
   out.push(`| Status | ${STATUS_LABEL[result.status] || result.status} |`)
-  out.push(`| Panel | ${cell(result.panel.map((p) => `${who(p)}${p.alias ? ` = ${p.alias}` : ''}`).join(', '))} |`)
+  out.push(`| Panel | ${cell(result.panel.map((p) => `${who(p)}${p.alias ? ` = ${p.alias}` : ''}${result.lenses?.[p.id] ? ` (lensa: ${result.lenses[p.id]})` : ''}`).join(', '))} |`)
   out.push(`| Moderator | ${cell(who(result.moderator))} |`)
   out.push(`| Ronde debat | ${debateRounds} dari maks. ${result.maxRounds}${result.rounds.some((r) => r.mode === 'vote') ? ' + suara akhir' : ''} |`)
   out.push(`| Aturan konsensus | ${result.consensus === 'majority' ? 'mayoritas' : 'bulat'} |`)
   out.push(`| Web search | ${result.web ? 'aktif untuk agen yang mendukung' : 'mati'} |`)
   out.push(`| Verifikasi sumber | ${result.verify ? 'aktif (oleh program)' : 'mati'} |`)
+  if (result.research) out.push(`| Riset literatur | ${result.research.literature.length} sumber ilmiah, ${result.research.insights.length} insight |`)
   if (result.memory?.length) {
     const list = result.memory.map((m) => `${m.id} (${m.question}; klaim ✅: ${m.claims.length ? m.claims.join(', ') : 'tidak ada'})`)
     out.push(`| Melanjutkan sidang | ${cell(list.join('\n'))} |`)
@@ -88,6 +89,10 @@ export function buildReport(result) {
     out.push(...result.frame.criteria.map((c) => `- ${c}`))
     if (result.frame.context) out.push('', `Konteks: ${result.frame.context}`)
     out.push('')
+  }
+  if (result.frame.obvious?.length) {
+    out.push('## Jawaban klise yang harus dilampaui', '', '> Disusun moderator sebelum debat: jawaban yang paling mungkin diberikan kebanyakan orang atau AI.', '')
+    out.push(...result.frame.obvious.map((o) => `- ${o}`), '')
   }
 
   out.push('## Kesimpulan', '')
@@ -115,6 +120,8 @@ export function buildReport(result) {
   if (result.final?.agreements?.length) out.push('## Poin yang disepakati', '', ...result.final.agreements.map((a) => `- ${a}`), '')
   if (result.final?.disagreements?.length) out.push('## Perbedaan pendapat', '', ...result.final.disagreements.map((d) => `- ${d}`), '')
 
+  if (result.research) out.push(...researchSection(result.research))
+
   if (result.flags?.length) {
     out.push('## Catatan integritas', '')
     out.push('> Dicatat oleh program. Tidak mengubah hasil suara, kecuali "setuju tapi menulis keberatan pemblokir" yang dihitung tidak setuju.', '')
@@ -132,12 +139,14 @@ export function buildReport(result) {
       for (const c of claims) if (c.verification) counts[c.verification.status] = (counts[c.verification.status] || 0) + 1
       const summary = Object.entries(counts).map(([s, n]) => `${VERIFY_STATUS[s]?.icon || s} ${n}`).join(' · ')
       out.push(`> Diperiksa oleh program: halaman sumber dibuka dan kutipannya dicari. ${summary || 'Belum ada yang diperiksa.'}`)
-      out.push('> ❔ berarti tidak bisa dicek otomatis (mis. situs memblokir bot atau berupa PDF), bukan berarti salah.', '')
+      out.push('> ❔ berarti tidak bisa dicek otomatis (mis. situs memblokir bot atau berupa PDF), bukan berarti salah.')
+      if (result.research?.literature.length) out.push('> Kutipan dari sumber literatur S dicek ke judul dan abstraknya.')
+      out.push('')
     } else out.push('> Verifikasi sumber dimatikan; klaim di bawah belum diperiksa.', '')
     out.push('| ID | Klaim | Jenis | Sumber | Verifikasi | Oleh |', '|---|---|---|---|---|---|')
     for (const c of claims) {
       const source = c.source_url ? `${c.source_url}${c.quote ? `<br>"${c.quote}"` : ''}` : '–'
-      const by = c.by.map((id) => (id === 'memori' ? 'memori sidang sebelumnya' : labelOf[id] || id)).join(', ')
+      const by = c.by.map((id) => (id === 'memori' ? 'memori sidang sebelumnya' : id === 'peneliti' ? 'peneliti' : labelOf[id] || id)).join(', ')
       const rounds = c.rounds.filter((r) => r > 0)
       out.push(`| ${c.id} | ${cell(c.text)} | ${c.kind} | ${cell(source)} | ${cell(verificationCell(c))} | ${cell(rounds.length ? `${by}; ronde ${rounds.join(', ')}` : by)} |`)
     }
@@ -158,7 +167,14 @@ export function buildReport(result) {
       const x = res.response
       out.push(`#### ${nameWithAlias(p.id)} · ${secs(res.ms)}${res.repaired ? ' · format diperbaiki' : ''}`, '')
       if (x.position) out.push(x.position, '')
-      if (x.proposals?.length) out.push(...x.proposals.map((pr) => `- **${pr.id}: ${pr.title}**${pr.why ? ` — ${pr.why}` : ''}`), '')
+      if (x.proposals?.length) {
+        for (const pr of x.proposals) {
+          out.push(`- **${pr.id}: ${pr.title}**${pr.why ? ` — ${pr.why}` : ''}${pr.basis?.length ? ` _(dasar: ${pr.basis.join(', ')})_` : ''}`)
+          if (pr.non_obvious) out.push(`  - Tidak umum karena: ${pr.non_obvious}`)
+          if (pr.why_now) out.push(`  - Kenapa sekarang: ${pr.why_now}`)
+        }
+        out.push('')
+      }
       const ids = [...new Set([...(x.claims || []).map((c) => c.id), ...(x.cited_claims || [])])]
       if (ids.length) out.push(`Klaim: ${ids.join(', ')}`, '')
       if (x.critiques?.length) out.push('Kritik:', ...x.critiques.map((c) => `- [${c.severity}]${c.target ? ` ${c.target}:` : ''} ${c.point}`), '')
@@ -183,10 +199,34 @@ export function buildReport(result) {
   return out.join('\n')
 }
 
+function researchSection(research) {
+  const out = ['## Riset', '']
+  if (research.insights.length) {
+    out.push('### Insight', '', '> Ditulis peneliti AI sebelum debat. Insight adalah tafsiran; buktinya sumber S dan klaim K yang dirujuk.', '')
+    for (const x of research.insights) {
+      out.push(`- **${x.id}: ${x.finding}**${x.sources.length ? ` (${x.sources.join(', ')})` : ' (tanpa sumber)'}`)
+      if (x.why_non_obvious) out.push(`  - Tidak umum karena: ${x.why_non_obvious}`)
+      if (x.implication) out.push(`  - Implikasi: ${x.implication}`)
+      if (x.open_question) out.push(`  - Belum pasti: ${x.open_question}`)
+    }
+    out.push('')
+  }
+  if (research.gaps?.length) out.push('### Masalah yang belum terpecahkan', '', ...research.gaps.map((g) => `- ${g}`), '')
+  if (research.why_now?.length) out.push('### Yang baru berubah (why now)', '', ...research.why_now.map((w) => `- ${w}`), '')
+  if (research.literature.length) {
+    out.push('### Sumber literatur', '', '> Judul dan abstrak diambil program dari indeks ilmiah (Semantic Scholar, OpenAlex, arXiv).', '')
+    out.push('| ID | Judul | Tahun | Venue | Sitasi | Tautan |', '|---|---|---|---|---|---|')
+    for (const p of research.literature) out.push(`| ${p.id} | ${cell(p.title)} | ${p.year || '–'} | ${cell(p.venue || '–')} | ${p.citations ?? '–'} | ${p.url || '–'} |`)
+    out.push('')
+  }
+  return out
+}
+
 function usageSection(result, labelOf) {
   const u = result.usage
   const out = ['## Pemakaian', '']
   out.push(`- Panggilan AI: ${u.calls}${u.failedCalls ? ` (${u.failedCalls} gagal)` : ''}; total durasi panggilan ${Math.round(u.ms / 1000)} dtk (sebagian berjalan paralel)`)
+  if (u.searches) out.push(`- Pencarian web yang dilaporkan penyedia: ${u.searches}`)
   if (u.costUsd) out.push(`- Estimasi biaya: $${u.costUsd.toFixed(4)} (Claude Code: \`total_cost_usd\`; agen API: dari "pricing" di config). Ini estimasi sisi klien, bukan tagihan.`)
   if (u.truncated) out.push(`- ⚠️ ${u.truncated} jawaban berhenti di batas \`maxTokens\` dan mungkin terpotong. Naikkan \`maxTokens\` agen di config.`)
   if (u.measured) {

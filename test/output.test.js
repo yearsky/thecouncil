@@ -10,7 +10,7 @@ import { buildReport, demoteHeadings } from '../src/council/report.js'
 import { createSession, slugify, stamp } from '../src/store/session.js'
 import { createTerminalRenderer } from '../src/ui/terminal.js'
 import { createStyle } from '../src/ui/style.js'
-import { fakeBin, scriptedAgent, startFakeApi } from './helpers.js'
+import { fakeBin, scriptedAgent, startFakeApi, startFakeScholar } from './helpers.js'
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -109,15 +109,28 @@ test('tampilan terminal mencetak jalannya sidang seperti chat', async () => {
   assert.match(text, /━━ Hasil: ✔ BULAT \(ronde 2\) ━━\nringkas r1\nLaporan: sessions\/x\/report\.md/)
   assert.match(text, /━━ Hasil: ◐ MAYORITAS \(suara akhir\) ━━/)
   assert.doesNotMatch(text, /menunggu:/) // baris status hanya untuk terminal interaktif
+
+  let research = ''
+  const r2 = createTerminalRenderer({ out: { write: (s) => (research += s), isTTY: false }, style: createStyle(false) })
+  r2.handle({ type: 'framed', question: 'Q?', criteria: [], context: '', obvious: ['chatbot WhatsApp'] })
+  r2.handle({ type: 'literature', queries: ['q'], papers: [{ id: 'S1', title: 'Paper', year: 2024, venue: 'J' }] })
+  r2.handle({ type: 'researched', insights: [{ id: 'I1', finding: 'temuan', sources: ['S1'] }], search: { requests: 3 } })
+  r2.close()
+  assert.match(research, /Jawaban klise yang harus dilampaui: chatbot WhatsApp/)
+  assert.match(research, /\[Literatur\] 1 sumber dari 1 kata kunci\n  S1 Paper \(2024, J\)/)
+  assert.match(research, /\[Peneliti\] 1 insight · 3 pencarian web\n  I1: temuan \(S1\)/)
 })
 
 test('council run end-to-end lewat CLI dengan Claude palsu (--json)', async (t) => {
   const api = await startFakeApi()
+  const scholar = await startFakeScholar()
   t.after(api.close)
+  t.after(scholar.close)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'council-run-'))
   const config = {
     moderator: { agent: 'opus', model: 'opus' },
     panel: ['opus', 'haiku'],
+    research: { baseURLs: scholar.baseURLs, gaps: { semanticscholar: 0, openalex: 0, arxiv: 0 } },
     agents: {
       opus: { type: 'claude-cli', label: 'Claude Opus', bin: fakeBin('fake-claude.js'), model: 'opus' },
       haiku: { type: 'claude-cli', label: 'Claude Haiku', bin: fakeBin('fake-claude.js'), model: 'haiku' }
@@ -146,31 +159,34 @@ test('council run end-to-end lewat CLI dengan Claude palsu (--json)', async (t) 
   const last = events.at(-1)
   assert.equal(last.type, 'finished')
   assert.equal(last.status, 'unanimous')
-  // Verifier sungguhan membuka halaman sumber palsu dan menemukan kutipannya.
+  // Verifier sungguhan membuka halaman sumber palsu dan menemukan kutipannya; kutipan paper dicek ke abstraknya.
   assert.ok(events.some((e) => e.type === 'verified'))
-  assert.equal(last.verification.verified, 1)
+  assert.equal(last.verification.verified, 2)
+  assert.deepEqual(events.find((e) => e.type === 'literature').papers.map((p) => p.id), ['S1', 'S2'])
+  assert.equal(events.find((e) => e.type === 'researched').insights.length, 2)
   assert.ok(fs.existsSync(last.report))
   assert.match(fs.readFileSync(last.report, 'utf8'), /Draft kesimpulan ronde 1/)
   const saved = fs.readFileSync(path.join(path.dirname(last.report), 'events.jsonl'), 'utf8').trim().split('\n')
   assert.equal(saved.length, events.length)
   const memory = JSON.parse(fs.readFileSync(path.join(path.dirname(last.report), 'memory.json'), 'utf8'))
-  assert.equal(memory.claims.length, 1)
+  assert.equal(memory.claims.length, 2)
 
   // --lanjut: kesimpulan + klaim ✅ sidang tadi ikut ke sidang baru.
   const sessionId = path.basename(path.dirname(last.report))
   const next = await run(['Lanjutkan: rencana MVP', '--json', '--rounds', '2', '--lanjut', sessionId])
   assert.equal(next.status, 0, next.stderr)
   const nevents = next.stdout.trim().split('\n').map((l) => JSON.parse(l))
-  assert.deepEqual(nevents[0].memory, [{ id: sessionId, question: memory.question, claims: 1 }])
+  assert.deepEqual(nevents[0].memory, [{ id: sessionId, question: memory.question, claims: 2 }])
   const missing = await run(['x', '--lanjut', 'folder-yang-tidak-ada'])
   assert.equal(missing.status, 1)
   assert.match(missing.stderr, /--lanjut: folder sesi "folder-yang-tidak-ada" tidak ditemukan/)
 
-  const disagree = await run(['Ide hackathon', '--json', '--rounds', '1', '--model', 'haiku=sonnet', '--no-verify'], { FAKE_CLAUDE_MODE: 'disagree' })
+  const disagree = await run(['Ide hackathon', '--json', '--rounds', '1', '--model', 'haiku=sonnet', '--no-verify', '--no-research'], { FAKE_CLAUDE_MODE: 'disagree' })
   assert.equal(disagree.status, 0, disagree.stderr)
   const devents = disagree.stdout.trim().split('\n').map((l) => JSON.parse(l))
   assert.equal(devents.at(-1).status, 'no_consensus')
   assert.equal(devents[0].panel[1].model, 'sonnet')
+  assert.ok(!devents.some((e) => e.type === 'literature' || e.type === 'researched'), '--no-research')
 
   const bad = await run(['topik', '--rounds', '0', '--model', 'gemini=x', '--search-budget=-1'])
   assert.equal(bad.status, 1)
